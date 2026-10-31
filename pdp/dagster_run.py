@@ -8,6 +8,7 @@ from contextlib import chdir, contextmanager
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 import dagster as dg
 from dagster._core.instance.ref import InstanceRef
@@ -52,7 +53,7 @@ def _report(pdp: PDP, selection: set[str], result: dg.JobExecutionResult) -> Run
     failed_steps = {event.step_key for event in result.get_step_failure_events()}
 
     report = RunReport()
-    for tid in pdp.order(flattened):
+    for tid in pdp.ordered_tasks():
         if tid not in selection:
             continue
         if tid in materialized:
@@ -61,7 +62,7 @@ def _report(pdp: PDP, selection: set[str], result: dg.JobExecutionResult) -> Run
                 report.current.append(tid)
                 continue
             report.ran.append(tid)
-            if written := metadata["pdp/written"].value:
+            if written := cast("list[str]", metadata["pdp/written"].value):
                 report.written[tid] = written
             if metadata["pdp/no_output"].value:
                 report.no_output.append(tid)

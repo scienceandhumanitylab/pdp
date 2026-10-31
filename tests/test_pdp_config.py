@@ -124,6 +124,20 @@ def test_task_config_clean_is_optional_list(fs):
     )
 
 
+def test_task_config_bare_keys_read_as_empty_lists(fs):
+    # `depends_on:` / `clean:` with no value load as None, which must not
+    # reach graphlib or the clean loop
+    write_config_file(
+        "task.yml",
+        {"name": "task1", "entrypoint": "", "depends_on": None, "clean": None},
+    )
+
+    config = TaskConfig("task1", "task.yml")
+
+    expect(config.depends_on).to(equal([]))
+    expect(config.clean).to(equal([]))
+
+
 def test_task_config_repr_prints_name_and_path(fs):
     config = TaskConfig("task1", "task.yml")
     expect(str(config)).to(equal("TaskConfig(task1, /task.yml)"))
