@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import sys
@@ -396,6 +397,19 @@ class TestStatusCli:
         expect(result.stdout).to(contain("status: Stale"))
         expect(result.stdout).to(contain("description: Load data"))
         expect(result.stdout).to(contain("depends on: import"))
+
+    def test_status_json(self, import_and_clean_project):
+        write_task_yml("import", description="Load data")
+
+        result = CliRunner(mix_stderr=False).invoke(app, ["status", "--json"])
+
+        expect(result.exit_code).to(equal(0))
+        status = json.loads(result.stdout)
+        expect(status["project"]).to(equal(import_and_clean_project.project_name))
+        expect([t["id"] for t in status["tasks"]]).to(equal(["import", "clean"]))
+        imp, clean = status["tasks"]
+        expect(imp).to(have_keys(stale=True, depends_on=[], description="Load data"))
+        expect(clean).to(have_keys(stale=True, depends_on=["import"], slurm={}))
 
 
 class TestDagsterCli:

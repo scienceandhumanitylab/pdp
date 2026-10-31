@@ -422,6 +422,39 @@ class TestStatus:
         )
 
     @pytest.mark.usefixtures("remote_project")
+    def test_json(self):
+        squeue = "11 pdp-run1-import\n12 my-other-job\n"
+        with fake_run(session=True, ports=(True,), squeue=squeue, last_run=REPORT):
+            result = invoke("remote", "status", "--json")
+
+        expect(result.exit_code).to(equal(0))
+        expect(json.loads(result.stdout)).to(
+            have_keys(
+                host="me@login1",
+                path="/gpfs/proj",
+                port="3000",
+                pushed=True,
+                session={"name": "pdp-test", "running": True},
+                run={"running": False, "last": REPORT},
+                dagster_listening=True,
+                jobs=["11"],
+            )
+        )
+
+    @pytest.mark.usefixtures("remote_project")
+    def test_json_jobs_null_when_squeue_fails(self):
+        def squeue_fails(argv, **kwargs):
+            if argv[-1].startswith("squeue"):
+                raise subprocess.CalledProcessError(1, argv)
+            return subprocess.CompletedProcess(argv, 0, stdout="")
+
+        with patch("subprocess.run", side_effect=squeue_fails):
+            result = invoke("remote", "status", "--json")
+
+        expect(result.exit_code).to(equal(0))
+        expect(json.loads(result.stdout)["jobs"]).to(be_none)
+
+    @pytest.mark.usefixtures("remote_project")
     def test_unreachable_host_exits_1(self):
         with fake_run(reachable=False) as run:
             result = invoke("remote", "status")

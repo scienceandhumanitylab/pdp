@@ -40,20 +40,29 @@ projects (see [Usage](#usage)).
 ## Install
 
 Soon to be available on PyPI. Meanwhile, you can install with
-[uv](https://docs.astral.sh/uv/):
+[uv](https://docs.astral.sh/uv/). First, install uv if needed:
 
 ```sh
-# Install uv
 curl -LsSf https://astral.sh/uv/install.sh | sh
+```
 
-# Install pdp
+Then use uv to install pdp:
+
+```sh
 uv tool install "pdp[dagster] @ git+https://github.com/scienceandhumanitylab/pdp"
+```
 
-# Alternatively, install just the core PDP features
-# No Dagster or Slurm - local use only
+Alternatively, if you want to keep things slim and don't care for Dagster, you
+can install just the core pdp features:
+
+```sh
 uv tool install "pdp @ git+https://github.com/scienceandhumanitylab/pdp"
+```
 
-# Upgrade pdp
+As new features are added, remember to upgrade to the most recent version of
+pdp:
+
+```sh
 uv tool upgrade pdp
 ```
 

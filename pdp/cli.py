@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -365,6 +366,9 @@ def status(
             "--verbose", "-v", help="Show description, entrypoint, and slurm flags"
         ),
     ] = False,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Print machine-readable JSON")
+    ] = False,
 ) -> None:
     """Print status for each task
 
@@ -373,9 +377,25 @@ def status(
     pdp = load_pdp()
     flattened = pdp.flatten_tasks()
     graph = {tid: task.depends_on for tid, task in flattened.items()}
+    order = list(TopologicalSorter(graph).static_order())
+
+    if as_json:
+        tasks = [
+            {
+                "id": tid,
+                "stale": flattened[tid].is_stale,
+                "depends_on": list(flattened[tid].depends_on),
+                "description": flattened[tid].description,
+                "entrypoint": flattened[tid].entrypoint,
+                "slurm": dict(flattened[tid].task_config.slurm or {}),
+            }
+            for tid in order
+        ]
+        print(json.dumps({"project": pdp.project_name, "tasks": tasks}))
+        raise typer.Exit(0)
 
     console.print()
-    for i, tid in enumerate(TopologicalSorter(graph).static_order()):
+    for i, tid in enumerate(order):
         if verbose and i:
             console.print()
         task = flattened[tid]
@@ -615,59 +635,85 @@ def remote_pull(
 
 @remote_app.command("status")
 @remote_app.command("s", hidden=True)
-def remote_status() -> None:
+def remote_status(
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Print machine-readable JSON")
+    ] = False,
+) -> None:
     """Show the remote config, if the project exists on remote, and what is running there."""
 
     cluster, _, name = _load_remote()
     session = remote.session_name(name)
-    console.print()
-    console.print(f"host:     {cluster.host}", markup=False)
-    console.print(f"path:     {cluster.path}", markup=False, highlight=False)
-    console.print(f"port:     {cluster.port}", markup=False, highlight=False)
-    console.print(
-        f"version:  {cluster.spec}", markup=False, soft_wrap=True, highlight=False
-    )
+    if not as_json:
+        console.print()
+        console.print(f"host:     {cluster.host}", markup=False)
+        console.print(f"path:     {cluster.path}", markup=False, highlight=False)
+        console.print(f"port:     {cluster.port}", markup=False, highlight=False)
+        console.print(
+            f"version:  {cluster.spec}", markup=False, soft_wrap=True, highlight=False
+        )
 
     with _remote_errors():
         if not remote.reachable(cluster):
             raise remote.RemoteError(f"Cannot reach {cluster.host} over SSH.")
 
         pushed = remote.exists(cluster)
-        console.print(f"project:  {'exists' if pushed else 'not pushed yet'}")
-
-        running = remote.has_session(cluster, session)
-        console.print(
-            f"session:  {session} {'[blue]running[/]' if running else '[red]not running[/]'}"
-        )
-
-        if remote.has_session(cluster, remote.run_session_name(name)):
-            run = "[blue]running[/]"
-        elif last := remote.last_run(cluster):
-            finished = datetime.fromisoformat(last["finished"])
-            failed = len(last["failed"]) + len(last["no_entrypoint"])
-            run = (
-                f"finished {finished:%Y-%m-%d %H:%M}, "
-                f"ran {len(last['ran'])}, failed {failed}"
-            )
-        else:
-            run = "none"
-        console.print(f"run:      {run}", highlight=False)
-
-        if remote.port_open(cluster, cluster.port):
-            console.print(
-                f"dagster: listening on {cluster.port} (tunnel: pdp remote start)"
-            )
-        else:
-            console.print(f"dagster:  not listening on {cluster.port}", highlight=False)
-
+        session_running = remote.has_session(cluster, session)
+        run_running = remote.has_session(cluster, remote.run_session_name(name))
+        last = None if run_running else remote.last_run(cluster)
+        listening = remote.port_open(cluster, cluster.port)
         try:
             job_ids = remote.pdp_job_ids(cluster)
-            jobs = f"{len(job_ids)} ({', '.join(job_ids)})" if job_ids else "0"
         except subprocess.CalledProcessError:
-            jobs = "unknown (squeue failed)"
-        console.print(f"jobs:     {jobs}", highlight=False)
+            job_ids = None
 
-        console.print()
+    if as_json:
+        status = {
+            "host": cluster.host,
+            "path": str(cluster.path),
+            "port": cluster.port,
+            "version": cluster.spec,
+            "pushed": pushed,
+            "session": {"name": session, "running": session_running},
+            "run": {"running": run_running, "last": last},
+            "dagster_listening": listening,
+            "jobs": job_ids,
+        }
+        print(json.dumps(status))
+        return
+
+    console.print(f"project:  {'exists' if pushed else 'not pushed yet'}")
+    console.print(
+        f"session:  {session} {'[blue]running[/]' if session_running else '[red]not running[/]'}"
+    )
+
+    if run_running:
+        run = "[blue]running[/]"
+    elif last:
+        finished = datetime.fromisoformat(last["finished"])
+        failed = len(last["failed"]) + len(last["no_entrypoint"])
+        run = (
+            f"finished {finished:%Y-%m-%d %H:%M}, "
+            f"ran {len(last['ran'])}, failed {failed}"
+        )
+    else:
+        run = "none"
+    console.print(f"run:      {run}", highlight=False)
+
+    if listening:
+        console.print(
+            f"dagster: listening on {cluster.port} (tunnel: pdp remote start)"
+        )
+    else:
+        console.print(f"dagster:  not listening on {cluster.port}", highlight=False)
+
+    if job_ids is None:
+        jobs = "unknown (squeue failed)"
+    else:
+        jobs = f"{len(job_ids)} ({', '.join(job_ids)})" if job_ids else "0"
+    console.print(f"jobs:     {jobs}", highlight=False)
+
+    console.print()
 
 
 @remote_app.command("stop")

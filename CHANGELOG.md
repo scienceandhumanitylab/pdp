@@ -21,7 +21,20 @@ When merging to main:
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-11-02
+
+### Added
+
+- `pdp status --json` and `pdp remote status --json` print machine-readable JSON
+  for integrated tools.
+
+### Changed
+
+- Small changes to README.md for ease of copying code chunks.
+
 ## [0.2.3] - 2026-10-28
+
+### Added
 
 - `pdp run` accepts several task IDs and selection flags:
   - `--only` runs the given tasks without their upstream.
