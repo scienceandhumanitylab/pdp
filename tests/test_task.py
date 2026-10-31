@@ -312,7 +312,7 @@ class TestSlurmFlags:
 
 
 class TestClean:
-    def test_clean_removes_matching_files_and_folders(self, real_task):
+    def test_clean_removes_everything_in_output(self, real_task):
         write_task_yml(real_task.task_directory)
         (real_task.output_folder / "result.csv").touch()
 

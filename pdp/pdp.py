@@ -162,7 +162,8 @@ class PDP:
                 dependents[dep].append(tid)
         return _reach(dependents, task_id)
 
-    def order(self, flattened: dict[str, Task]) -> list[str]:
+    def ordered_tasks(self) -> list[str]:
+        flattened = self.flatten_tasks()
         graph = {tid: task.depends_on for tid, task in flattened.items()}
         return list(TopologicalSorter(graph).static_order())
 
@@ -205,14 +206,14 @@ class PDP:
         deps = {dep for tid in selection for dep in flattened[tid].depends_on}
         return [
             tid
-            for tid in self.order(flattened)
+            for tid in self.ordered_tasks()
             if tid in deps - selection and flattened[tid].is_stale
         ]
 
     def _run_many(
         self, flattened: dict[str, Task], task_ids, force: bool = False
     ) -> RunReport:
-        order = [tid for tid in self.order(flattened) if tid in task_ids]
+        order = [tid for tid in self.ordered_tasks() if tid in task_ids]
 
         all_task_ids = set(flattened)
 
@@ -267,9 +268,11 @@ class PDP:
 
     def task_tree(self) -> Tree:
         """Flat numbered list of tasks under the project name, with dependencies."""
-        tree = Tree(f"1. {self.project_name}")
-        for num, task in enumerate(self.tasks, start=2):
-            label = f"{num}. {task.task_id}"
+        tree = Tree(f"{self.project_name}")
+        flattened = self.flatten_tasks()
+        for i, task_id in enumerate(self.ordered_tasks(), start=1):
+            task = flattened[task_id]
+            label = f"{i}. {task.task_id}"
             if task.depends_on:
                 label += f" [dim] <- {', '.join(task.depends_on)}[/dim]"
             tree.add(label)

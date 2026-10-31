@@ -372,9 +372,9 @@ class TestTreeCli:
 
         expect(result.stdout).to(
             equal(
-                """1. test
-├── 2. hello
-└── 3. world
+                """test
+├── 1. hello
+└── 2. world
 """
             )
         )

@@ -153,9 +153,9 @@ class TestScaffoldTask:
         """Will revisit hierarchical tasks later"""
         tree = pdp.task_tree()
 
-        expect(tree.label).to(equal("1. test"))
+        expect(tree.label).to(equal("test"))
         expect([child.label for child in tree.children]).to(
-            equal(["2. hello", "3. world"])
+            equal(["1. hello", "2. world"])
         )
         expect([child.children for child in tree.children]).to(equal([[], []]))
 
@@ -167,7 +167,7 @@ class TestScaffoldTask:
         tree = pdp.task_tree()
 
         expect([child.label for child in tree.children]).to(
-            equal(["2. hello", "3. world [dim] <- hello[/dim]"])
+            equal(["1. hello", "2. world [dim] <- hello[/dim]"])
         )
 
     def test_pdp_create_task_from_current_location_raises_if_not_in_task(self, fs):
