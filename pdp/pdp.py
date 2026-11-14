@@ -7,7 +7,12 @@ from rich.tree import Tree
 from .pdp_config import PDPConfig
 from .pdp_errors import InvalidConfigError
 from .task import Task, latest_mtime_in_dir
-from .utils import TASK_NAME_RULE, find_project_root, is_valid_task_name
+from .utils import (
+    TASK_NAME_RULE,
+    find_project_root,
+    is_valid_task_name,
+    parse_dependency,
+)
 
 
 def _reach(edges: dict[str, list[str]], start: str) -> set[str]:
@@ -92,11 +97,32 @@ class PDP:
         flattened = self.flatten_tasks()
 
         for task_id, task in flattened.items():
-            for dep in task.depends_on:
+            whole_task, narrowed = set(), set()
+            for entry in task.dependency_entries:
+                if not isinstance(entry, str):
+                    continue
+                dep, pattern, group = parse_dependency(entry)
                 if dep not in flattened:
                     errors.append(
-                        f"{task_id}/task.yml: depends_on references unknown task '{dep}'"
+                        f"{task_id}/task.yml: depends_on references an unknown task '{dep}'"
                     )
+                    continue
+                if (
+                    group is not None
+                    and group not in flattened[dep].task_config.output_groups
+                ):
+                    errors.append(
+                        f"{task_id}/task.yml: {entry}: {dep} has no output group called '{group}'"
+                    )
+                (
+                    narrowed if pattern is not None or group is not None else whole_task
+                ).add(dep)
+
+            errors += [
+                f"{task_id}/task.yml: depends on the whole task '{dep}' and also an output group. \
+                    Choose one or the other."
+                for dep in sorted(whole_task & narrowed)
+            ]
 
         graph = {task_id: task.depends_on for task_id, task in flattened.items()}
         try:

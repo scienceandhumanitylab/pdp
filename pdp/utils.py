@@ -76,3 +76,35 @@ def dagster_env(project_root: Path, slurm: bool) -> dict[str, str]:
         env["PDP_SLURM"] = "1"
 
     return env
+
+
+def parse_dependency(entry: str) -> tuple[str, str | None, str | None]:
+    """Parse a task, file, wildcard, or group dependency
+
+    Args:
+        entry: string, from task.yml
+
+    Returns:
+        task_id, pattern (for matching), group
+    """
+    slash, colon = entry.find("/"), entry.find(":")
+
+    # task, task/*.csv, of task/subdir/*.csv. or task/a:b.csv if necessary
+    if slash != -1 and (colon == -1 or slash < colon):
+        task_id, _, pattern = entry.partition("/")
+        return task_id, pattern, None
+
+    # task:group
+    if colon != -1:
+        task_id, _, group = entry.partition(":")
+        return task_id, None, group
+
+    return (entry, None, None)
+
+
+def parsing_errors(pattern: str) -> list[str]:
+    if not pattern:
+        return ["empty pattern"]
+    if pattern.startswith("/"):
+        return [f"{pattern!r} should be relative to output/"]
+    return []

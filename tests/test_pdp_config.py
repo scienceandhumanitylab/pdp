@@ -215,6 +215,41 @@ class TestSlurmConfig:
         )
 
 
+class TestDependencyConfig:
+    def test_narrowed_entries_and_groups_are_valid(self, fs):
+        write_config_file(
+            "task.yml",
+            {
+                "name": "task1",
+                "entrypoint": "",
+                "depends_on": ["import/sub/*.csv", "clean:csvs"],
+                "output_groups": {"csvs": "*.csv"},
+            },
+        )
+
+        expect(TaskConfig("task1", "task.yml").validation_errors()).to(equal([]))
+
+    def test_bad_entries_groups_are_rejected(self, fs):
+        write_config_file(
+            "task.yml",
+            {
+                "name": "task1",
+                "entrypoint": "",
+                "depends_on": ["import/", "import//abs", 3],
+                "output_groups": "*.csv",
+            },
+        )
+
+        expect(TaskConfig("task1", "task.yml").validation_errors()).to(
+            contain(
+                contain("empty pattern"),
+                contain("should be relative to output/"),
+                contain("depends_on entry 3"),
+                contain("output_groups should be mappings"),
+            )
+        )
+
+
 class TestRunnerConfig:
     @pytest.mark.parametrize(
         "yml, runner", [({}, "pdp"), ({"runner": "dagster"}, "dagster")]

@@ -5,7 +5,13 @@ from typing import ClassVar
 from ruamel.yaml import YAML
 
 from .pdp_errors import UninitializedProjectError
-from .utils import TASK_NAME_RULE, input_env_var, is_valid_task_name
+from .utils import (
+    TASK_NAME_RULE,
+    input_env_var,
+    is_valid_task_name,
+    parse_dependency,
+    parsing_errors,
+)
 
 RUNNERS = ("pdp", "dagster")
 
@@ -46,6 +52,32 @@ def slurm_errors(config: dict) -> list[str]:
                 f"slurm.{key} must be a string, number or boolean, "
                 f"got {_yaml_type_name(value)}"
             )
+    return errors
+
+
+def output_group_errors(config: dict) -> list[str]:
+    if "output_groups" not in config:
+        return []
+
+    groups = config["output_groups"]
+    if not isinstance(groups, dict):
+        return [
+            (
+                f"output_groups should be mappings, like 'output_groups: {{csvs: \"*.csv\"}}', "
+                f"but got {_yaml_type_name(groups)}"
+            )
+        ]
+
+    errors = []
+    for name, pattern in groups.items():
+        if not is_valid_task_name(name):
+            errors.append(f"output group name {name!r} must be {TASK_NAME_RULE}")
+        elif not isinstance(pattern, str):
+            errors.append(
+                f"output_groups.{name} must be a string, got {_yaml_type_name(pattern)}"
+            )
+        else:
+            errors += [f"output_groups.{name}: {e}" for e in parsing_errors(pattern)]
     return errors
 
 
@@ -193,7 +225,9 @@ class TaskConfig(GenericConfig):
         errors = []
 
         unexpected = (
-            set(self.config.keys()) - allowed_keys - {"slurm", "description"}
+            set(self.config.keys())
+            - allowed_keys
+            - {"slurm", "description", "output_groups"}
         )
         missing = allowed_keys - set(self.config.keys())
 
@@ -219,6 +253,23 @@ class TaskConfig(GenericConfig):
                 f"description must be str, got {_yaml_type_name(self.config['description'])}"
             )
 
+        depends_on = self.config.get("depends_on")
+        if isinstance(depends_on, list):
+            for entry in depends_on:
+                if not isinstance(entry, str) or not entry:
+                    errors.append(f"depends_on entry {entry!r} must be a valid string")
+                    continue
+                _, pattern, group = parse_dependency(entry)
+                if pattern is not None:
+                    errors += [
+                        f"depends_on {entry!r}: {e}" for e in parsing_errors(pattern)
+                    ]
+                if group is not None and not is_valid_task_name(group):
+                    errors.append(
+                        f"depends_on {entry!r}: group must be {TASK_NAME_RULE}"
+                    )
+
+        errors += output_group_errors(self.config)
         errors += slurm_errors(self.config)
 
         return errors
@@ -232,7 +283,12 @@ class TaskConfig(GenericConfig):
 
     @property
     @requires_initialization
+    def output_groups(self) -> dict:
+        self.config = self.read_config_file()
+        return self.config.get("output_groups") or {}
 
+    @property
+    @requires_initialization
     def description(self) -> str:
         self.config = self.read_config_file()
         return self.config.get("description", "")

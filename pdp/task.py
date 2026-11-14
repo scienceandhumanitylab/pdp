@@ -7,7 +7,7 @@ import warnings
 from pathlib import Path
 
 from .pdp_config import TaskConfig
-from .utils import find_project_root, input_env_var
+from .utils import find_project_root, input_env_var, parse_dependency
 
 
 def latest_mtime_in_dir(dir: Path):
@@ -167,8 +167,20 @@ class Task:
         return self.task_config.entrypoint
 
     @property
-    def depends_on(self) -> list[str]:
+    def dependency_entries(self) -> list:
+        """Clean dependency entries, after being parsed"""
         return self.task_config.depends_on
+
+    @property
+    def depends_on(self) -> list[str]:
+        """Handle errors so that PDP.validation_errors doesn't crash here"""
+        return list(
+            dict.fromkeys(
+                parse_dependency(e)[0]
+                for e in self.dependency_entries
+                if isinstance(e, str)
+            )
+        )
 
     @property
     def description(self) -> str:

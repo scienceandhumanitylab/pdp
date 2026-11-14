@@ -64,6 +64,18 @@ class TestScaffold:
         expect(task.validate()).to(be_true)
 
 
+class TestDependsOn:
+    def test_depends_on_gets_unique_task_ids_and_keeps_raw_entries(
+        self, import_and_clean
+    ):
+        _, clean = import_and_clean
+        entries = ["import/*.csv", "import/*.txt"]
+        write_task_yml("/clean", depends_on=entries)
+
+        expect(clean.depends_on).to(equal(["import"]))
+        expect(clean.dependency_entries).to(equal(entries))
+
+
 class Validate:
     def test_task_validate_raises_on_unscaffolded_task(self, task, fs):
         errors = task.validation_errors()

@@ -10,21 +10,11 @@ from ruamel.yaml import YAML
 from pdp.pdp import PDP, PDPConfig
 from pdp.pdp_errors import InvalidConfigError
 from pdp.task import Task
-from pdp.utils import find_project_root
 from tests.helpers import backdate_task_yml, write_task_yml
 
 
 def read_config_file(filename):
     return dict(YAML().load(Path(filename)))
-
-
-class TestUtilities:
-    def test_find_project_root(self, fs):
-        pdp = PDP("test")
-        pdp.initialize()
-
-        root = find_project_root("pdp.yml", start=pdp.project_root)
-        assert root == pdp.project_root
 
 
 class TestInitialize:
@@ -73,6 +63,30 @@ class TestValidate:
         task = pdp.create_task("hello")
         task.task_config.update_config_key("depends_on", ["bad_task"])
         expect(pdp.validate()).to(be_false)
+
+    def test_throws_for_unknown_task(self, import_and_clean_project):
+        write_task_yml("clean", depends_on=["bad_task/*.csv"])
+
+        errors = import_and_clean_project.validation_errors()
+        expect([e for e in errors if "unknown task" in e]).to(have_len(1))
+
+    def test_output_group_must_exist_on_dependency(self, import_and_clean_project):
+        write_task_yml("import", output_groups={"csvs": "*.csv"})
+
+        write_task_yml("clean", depends_on=["import:csvs"])
+        expect(import_and_clean_project.validation_errors()).to(equal([]))
+
+        write_task_yml("clean", depends_on=["import:pdfs"])
+        expect(import_and_clean_project.validation_errors()).to(
+            contain(contain("import has no output group called 'pdfs'"))
+        )
+
+    def test_whole_and_narrowed_same_task_is_rejected(self, import_and_clean_project):
+        write_task_yml("clean", depends_on=["import", "import/*.csv"])
+
+        expect(import_and_clean_project.validation_errors()).to(
+            contain(contain("depends on the whole task 'import'"))
+        )
 
     def test_pdp_validate_raises_on_cycle(self, pdp):
         task1 = pdp.create_task("hello")
