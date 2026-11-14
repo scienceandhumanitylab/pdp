@@ -39,7 +39,7 @@ projects (see [Usage](#usage)).
 
 ## Install
 
-Soon to be available on PyPI. Meanwhile, you can install with
+Soon to be available on PyPI. Meanwhile, we recommend installing with
 [uv](https://docs.astral.sh/uv/). First, install uv if needed:
 
 ```sh
@@ -66,6 +66,12 @@ pdp:
 uv tool upgrade pdp
 ```
 
+pdp can then be run from the command line with:
+
+```sh
+pdp
+```
+
 **Requirements:**
 
 - Python 3.11+
@@ -76,6 +82,40 @@ Optional
 - dagster>=1.13,<1.14
 - dagster-webserver>=1.13,<1.14
 
+### Other Package Managers
+
+To install with pipx:
+
+```sh
+# install pipx
+python -m pip install --user pipx
+
+# install pdp
+pipx install git+https://github.com/scienceandhumanitylab/pdp.git
+
+# upgrade pdp
+pipx upgrade pdp
+
+# run pdp
+pdp
+```
+
+To install with Poetry:
+
+```sh
+# Install Poetry
+pipx install poetry
+pipx upgrade poetry
+
+# Install pdp
+poetry add git+https://github.com/scienceandhumanitylab/pdp.git
+
+# Update pdp
+poetry update pdp
+
+# Run pdp
+poetry run pdp
+```
 ## Usage
 
 ### Editing an existing pdp project
