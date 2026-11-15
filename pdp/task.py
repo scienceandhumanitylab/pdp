@@ -115,6 +115,9 @@ class Task:
             | {"PDP_CHANGED": "\n".join(own_changed)}
         )
 
+        # Git drops empty output/ folders, so build on run if not there
+        self.output_folder.mkdir(exist_ok=True)
+
         # Snapshot to be able to revert changes
         before = self._output_snapshot()
 
@@ -150,8 +153,10 @@ class Task:
             removed: Paths removed, relative to the task directory
         """
         removed = []
+        if not self.output_folder.is_dir():
+            return removed
 
-        for path in (self.task_directory / "output").iterdir():
+        for path in self.output_folder.iterdir():
             if path.is_dir() and not path.is_symlink():
                 shutil.rmtree(path)
             elif path.is_symlink() or path.exists():
@@ -181,7 +186,7 @@ class Task:
     def validation_errors(self) -> list[str]:
         errors: list[str] = self.task_config.validation_errors()
 
-        for folder in (self.input_folder, self.output_folder, self.src_folder):
+        for folder in (self.input_folder, self.src_folder):
             if not folder.is_dir():
                 errors.append(f"{folder.name} is missing")
 

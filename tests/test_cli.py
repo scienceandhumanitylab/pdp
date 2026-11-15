@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -27,6 +28,10 @@ def read_config_file(filename):
     return dict(YAML().load(Path(filename)))
 
 
+def cli(*args, input=None):
+    return CliRunner(mix_stderr=False).invoke(app, list(args), input=input)
+
+
 def run_dagster_dev(returncode=0, args=()):
     with patch("subprocess.Popen") as popen:
         popen.return_value.wait.return_value = returncode
@@ -39,6 +44,12 @@ class TestInitCli:
         config_dict = read_config_file("/pdp.yml")
         expect(config_dict["name"]).to(equal("test"))
         expect(config_dict["tasks"]).to(equal([]))
+
+    def test_init_scaffolds_tasks_listed_in_pdp_yml(self, fs):
+        Path("/pdp.yml").write_text("name: test\ntasks: [hello]\n")
+
+        expect(cli("init", "--name", "test").exit_code).to(equal(0))
+        expect(Path("/hello/task.yml").exists()).to(be_true)
 
 
 class TestCreateCli:
@@ -210,6 +221,17 @@ class TestRunCli:
         result = CliRunner(mix_stderr=False).invoke(app, ["run"])
 
         expect(result.stdout).to(contain("Ran: import, clean"))
+
+    def test_run_recreates_missing_output_folder(self, real_pdp):
+        """Git drops empty output/ folders when a task is restored"""
+        task = real_pdp.create_task("task1")
+        write_task_yml("task1", entrypoint="touch output/ran")
+        task.output_folder.rmdir()
+
+        result = CliRunner(mix_stderr=False).invoke(app, ["run"])
+
+        expect(result.exit_code).to(equal(0))
+        expect((task.output_folder / "ran").exists()).to(be_true)
 
 
 class TestRunSelection:
@@ -447,6 +469,89 @@ class TestStatusCli:
             have_keys(depends_on=["import"], dependency_entries=["import/*.csv"])
         )
 
+    def status_by_id(self):
+        result = cli("status", "--json")
+        expect(result.exit_code).to(equal(0))
+        return {t["id"]: t for t in json.loads(result.stdout)["tasks"]}
+
+    def test_missing_task_folder_is_stale_and_stays_missing(self, other_deleted):
+        expect(self.status_by_id()["other"]).to(have_keys(stale=True, depends_on=[]))
+        expect(Path("other").exists()).to(be_false)
+
+    def test_depends_on_task_missing_from_pdp_yml(self, dag_project):
+        """clean still depends on import, but import is gone from pdp.yml"""
+        Path("pdp.yml").write_text("name: test\ntasks: [clean, report, other]\n")
+
+        tasks = self.status_by_id()
+
+        expect(list(tasks)).to(contain_only("clean", "report", "other"))
+        expect(list(tasks).index("clean")).to(be_below(list(tasks).index("report")))
+        expect(tasks["clean"]).to(have_keys(stale=True, depends_on=["import"]))
+        expect(cli("status").exit_code).to(equal(0))
+
+    @pytest.mark.parametrize("command", ["status", "tree"])
+    def test_cycle_fails_validation(self, dag_project, command):
+        write_task_yml("import", depends_on=["report"])
+
+        result = cli(command)
+
+        expect(result.exit_code).to(equal(1))
+        expect(result.stderr).to(contain("Validation failed."))
+        expect(result.stderr).to(contain("depends_on contains a cycle."))
+
+
+class TestDeleteCli:
+    """dag_project: import -> clean -> report, plus other"""
+
+    def listed(self):
+        return read_config_file("pdp.yml")["tasks"]
+
+    def test_yes_deletes_folder_and_pdp_yml_entry_without_asking(self, dag_project):
+        result = cli("delete", "report", "--yes")
+
+        expect(result.exit_code).to(equal(0))
+        expect(result.stdout).to_not(contain("Delete task"))
+        expect(Path("report").exists()).to(be_false)
+        expect(self.listed()).to(equal(["import", "clean", "other"]))
+
+    @pytest.mark.parametrize(
+        "answer, exit_code, kept", [("y", 0, False), ("n", 1, True)]
+    )
+    def test_asks_before_deleting(self, dag_project, answer, exit_code, kept):
+        result = cli("delete", "report", input=f"{answer}\n")
+
+        expect(result.exit_code).to(equal(exit_code))
+        expect(result.stdout).to(contain("Delete task report"))
+        expect(Path("report").exists()).to(equal(kept))
+        expect("report" in self.listed()).to(equal(kept))
+
+    def test_missing_folder_still_removes_entry(self, other_deleted):
+        expect(cli("delete", "other", "--yes").exit_code).to(equal(0))
+        expect(self.listed()).to(equal(["import", "clean", "report"]))
+
+    def test_symlinked_folder_loses_the_link_not_its_target(
+        self, dag_project, tmp_path_factory
+    ):
+        target = tmp_path_factory.mktemp("elsewhere") / "other"
+        shutil.move("other", target)
+        Path("other").symlink_to(target)
+
+        expect(cli("delete", "other", "--yes").exit_code).to(equal(0))
+        expect(Path("other").is_symlink()).to(be_false)
+        expect((target / "task.yml").exists()).to(be_true)
+
+    @pytest.mark.parametrize(
+        "task, error",
+        [("nope", "Task nope not found"), ("import", "depended on by clean")],
+    )
+    def test_refuses_before_asking(self, dag_project, task, error):
+        result = cli("delete", task)
+
+        expect(result.exit_code).to(equal(1))
+        expect(result.stderr).to(contain(error))
+        expect(result.stdout).to_not(contain("Delete task"))
+        expect(self.listed()).to(equal(["import", "clean", "report", "other"]))
+
 
 class TestDagsterCli:
     def test_pdp_dagster_dev_calls_module(self, real_pdp):
@@ -554,6 +659,12 @@ class TestClean:
 
         expect(result.exit_code).to(equal(0))
         expect(self.tasks_with_output(cleanable_dag)).to(equal(left))
+
+    def test_missing_task_folder_fails_validation(self, cleanable_dag, other_deleted):
+        result = cli("clean", "import")
+
+        expect(result.exit_code).to(equal(1))
+        expect(result.stderr).to(contain("Validation failed."))
 
     @pytest.mark.usefixtures("cleanable_dag")
     def test_prints_what_was_removed_then_nothing_to_clean(self):

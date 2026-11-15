@@ -1,4 +1,5 @@
 import os
+import shutil
 import time
 from dataclasses import dataclass, field
 from graphlib import CycleError, TopologicalSorter
@@ -86,8 +87,9 @@ class PDP:
         self.config.initialize()
         self.project_name = self.config.name
 
-        for task in self.config.tasks:
-            self.create_task(task)
+        self.tasks = [
+            Task(task, self.project_root / task) for task in self.config.tasks
+        ]
 
     def validation_errors(self) -> list[str]:
         """Reasons the project fails validation
@@ -204,6 +206,32 @@ class PDP:
 
         return task
 
+    def check_deletable(self, task_id: str) -> None:
+        """Raise ValueError for unknown ids and tasks that others depend on."""
+        flattened = self.flatten_tasks()
+        if task_id not in flattened:
+            raise ValueError(f"Task {task_id} not found")
+        dependents = [
+            tid for tid, task in flattened.items() if task_id in task.depends_on
+        ]
+        if dependents:
+            raise ValueError(
+                f"Cannot delete {task_id}: depended on by {', '.join(dependents)}"
+            )
+
+    def delete_task(self, task_id: str) -> None:
+        """Remove the task's folder, if it exists, and its pdp.yml entry."""
+        self.check_deletable(task_id)
+
+        # Unresolved: a symlinked task folder loses the link, never its target
+        folder = self.project_root / task_id
+        if folder.is_symlink():
+            folder.unlink()
+        elif folder.is_dir():
+            shutil.rmtree(folder)
+        self.config.remove_task(task_id)
+        self.tasks.remove(self.flatten_tasks()[task_id])
+
     def create_task_from_current_location(self, task_name: str) -> Task | None:
         if self.current_path == Path("."):
             return self.create_task(task_name)
@@ -242,7 +270,11 @@ class PDP:
 
     def ordered_tasks(self) -> list[str]:
         flattened = self.flatten_tasks()
-        graph = {tid: task.depends_on for tid, task in flattened.items()}
+        # Unlisted dependency ids are validate's to report, not a crash here
+        graph = {
+            tid: [dep for dep in task.depends_on if dep in flattened]
+            for tid, task in flattened.items()
+        }
         return list(TopologicalSorter(graph).static_order())
 
     def select(

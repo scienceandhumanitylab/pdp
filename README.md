@@ -318,6 +318,9 @@ assets in the UI. Alternatively, use any of the `pdp run` commands followed by
 
 - Run `pdp tree` to see the tree structure of all tasks.
 - Run `pdp validate` to validate the project configuration.
+- Run `pdp delete <task>` to delete a task's folder and remove it from
+  `pdp.yml`. It asks first (skip with `--yes`) and refuses while another task
+  depends on it.
 - Run `pdp clean` to delete each task's `clean:` files from `task.yml`, like
   `clean: [output/*]`.
 - Run `pdp freshen <task>` to make one or more stale tasks fresh without running

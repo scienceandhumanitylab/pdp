@@ -6,7 +6,7 @@ import sys
 from contextlib import contextmanager
 from datetime import datetime
 from enum import Enum
-from graphlib import TopologicalSorter
+from graphlib import CycleError, TopologicalSorter
 from importlib.metadata import version as pkg_version
 from pathlib import Path
 from typing import Annotated
@@ -93,10 +93,12 @@ def init(
 
     pdp = PDP(project_name)
     pdp.initialize()
+    for task in pdp.tasks:
+        task.scaffold()
 
 
 @app.command()
-@app.command("s", hidden=True)
+@app.command("scaf", hidden=True)
 def scaffold():
     """
     Scaffold the project.
@@ -129,12 +131,42 @@ def create(task_names: list[str]) -> None:
 
 
 @app.command()
+def delete(
+    task_id: str,
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Delete without asking.")
+    ] = False,
+) -> None:
+    """Delete a task, its folder and its entry in pdp.yml.
+
+    Refuses if another task depends on it. Remove dependencies
+    first. Asks before deleting unless --yes."""
+
+    pdp = load_pdp()
+
+    try:
+        pdp.check_deletable(task_id)
+        if not yes:
+            typer.confirm(
+                f"Delete task {task_id}: its folder {pdp.project_root / task_id} "
+                "and its pdp.yml entry?",
+                abort=True,
+            )
+        pdp.delete_task(task_id)
+    except (ValueError, OSError) as e:
+        err_console.print(str(e))
+        raise typer.Exit(1)
+
+    console.print(f"Deleted {task_id}.", markup=False)
+
+
+@app.command()
 @app.command("v", hidden=True)
 def validate():
     """Validate the pdp yml.
 
     Checks that:
-    - Each task has an input/, output/, and src/ folder
+    - Each task has an input/ and src/ folder
     - Each task has a valid `task.yml`
     - Any `depends_on` references a valid task
     - There are no dependency cycles in the project
@@ -330,6 +362,8 @@ def clean(task_ids: TaskIds = None, from_: From = None, to: To = None) -> None:
             task_ids = [current_task.task_id]
 
         selection = pdp.select(task_ids or [], bool(task_ids), from_, to)
+    except InvalidConfigError as e:
+        _exit_validation_failed(e)
     except ValueError as e:
         err_console.print(str(e))
         raise typer.Exit(1)
@@ -379,6 +413,8 @@ def freshen(
         report = pdp.freshen(
             pdp.select(task_ids or [], only, from_, to, downstream=True)
         )
+    except InvalidConfigError as e:
+        _exit_validation_failed(e)
     except ValueError as e:
         err_console.print(str(e))
         raise typer.Exit(1)
@@ -404,7 +440,10 @@ def tree() -> None:
     """Print the task tree as flat list with dependencies."""
 
     pdp = load_pdp()
-    tree = pdp.task_tree()
+    try:
+        tree = pdp.task_tree()
+    except CycleError:
+        _exit_validation_failed(InvalidConfigError("depends_on contains a cycle."))
     rprint(tree)
 
     raise typer.Exit(0)
@@ -429,8 +468,10 @@ def status(
 
     pdp = load_pdp()
     flattened = pdp.flatten_tasks()
-    graph = {tid: task.depends_on for tid, task in flattened.items()}
-    order = list(TopologicalSorter(graph).static_order())
+    try:
+        order = pdp.ordered_tasks()
+    except CycleError:
+        _exit_validation_failed(InvalidConfigError("depends_on contains a cycle."))
 
     if as_json:
         tasks = [

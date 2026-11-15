@@ -41,13 +41,29 @@ When merging to main:
   affect results, a comment in a `src/` file, and for generally making it easier
   to force the framework to your will when needed. `pdp freshen <task>` also
   freshens everything downstream of the task, not its upstream.
+- `pdp delete <task>` removes a task's dir and its entry in `pdp.yml`. It asks
+  for confirmation and refuses while another task depends on it.
+- `pdp scaf` is a shortcut for `pdp scaffold`.
 
 ### Changed
 
+- Loading a project no longer scaffolds every task in `pdp.yml`. This way, a
+  deleted task folder stays deleted instead of coming back on next command.
+  `pdp status` lists it as stale. `pdp scaffold` recreates it.
 - `pdp tree` and `pdp status` show `depends_on` entries as written to reflect
   files and globs (`clean <- import/*.csv`). `pdp status --json` keeps
   `depends_on` as Task IDs and adds `dependency_entries` field with raw entries.
 - Terminology for "current" task changed to "fresh" throughout for clarity.
+
+### Fixed
+
+- `pdp status` and `pdp tree` no longer crash when a `depends_on` entry names an
+  invalid task or a task missing from `pdp.yml`. `pdp validate` reports the
+  discrepancy. A dependency cycle makes `pdp status` exit 1 with the
+  `pdp validate` message.
+- A task missing its `output/` folder no longer fails validation. `pdp run`
+  creates it.
+- `pdp s` runs `pdp status`, no more conflict with `pdp scaffold`.
 
 ## [0.2.4] - 2026-11-02
 

@@ -151,6 +151,15 @@ class PDPConfig(GenericConfig):
 
             self.update_config_key(self.task_key, tasks)
 
+    @requires_initialization
+    def remove_task(self, task_name):
+        tasks = self.config[self.task_key]
+
+        if task_name in tasks:
+            tasks.remove(task_name)
+
+            self.update_config_key(self.task_key, tasks)
+
     @property
     def tasks(self):
         return self.config.get(self.task_key, [])
@@ -275,39 +284,33 @@ class TaskConfig(GenericConfig):
         return errors
 
     @property
-    @requires_initialization
     def clean(self) -> list[str]:
         self.config = self.read_config_file()
         # bare `clean:` in YAML loads as None, not the default
         return self.config.get("clean") or []
 
     @property
-    @requires_initialization
     def output_groups(self) -> dict:
         self.config = self.read_config_file()
         return self.config.get("output_groups") or {}
 
     @property
-    @requires_initialization
     def description(self) -> str:
         self.config = self.read_config_file()
         return self.config.get("description", "")
 
     @property
-    @requires_initialization
     def entrypoint(self):
         self.config = self.read_config_file()
-        return self.config["entrypoint"]
+        return self.config.get("entrypoint", "")
 
     @property
-    @requires_initialization
     def depends_on(self):
         self.config = self.read_config_file()
         # bare `depends_on:` in YAML loads as None, not the default
         return self.config.get("depends_on") or []
 
     @property
-    @requires_initialization
     def slurm(self) -> dict:
         self.config = self.read_config_file()
         return self.config.get("slurm", {})

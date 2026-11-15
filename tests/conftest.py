@@ -1,4 +1,5 @@
 import os
+import shutil
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -193,6 +194,13 @@ def fresh_dag(dag_project):
     for task in dag_project.tasks:
         backdate_task_yml(task)
         touch(task.output_folder / "result.csv", 100)
+    return dag_project
+
+
+@pytest.fixture
+def other_deleted(dag_project):
+    """dag_project with other's folder deleted, still listed in pdp.yml"""
+    shutil.rmtree(dag_project.project_root / "other")
     return dag_project
 
 
