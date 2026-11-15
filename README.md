@@ -198,7 +198,8 @@ depends_on:
 File dependencies only symlink matched files into `input/import/`, so the task
 only gets stale when those files change. Before the entrypoint runs, pdp sets
 the env var `PDP_CHANGED_<ID>` with the dependency files that changed since the
-task last ran.
+task last ran. A task without dependencies that keeps raw files in its own
+`input/` gets the same list in `PDP_CHANGED`.
 
 Let's say you have an `import` task with 10 input files and the task loops
 through them to produce 10 output files. A `clean` task depends on those files

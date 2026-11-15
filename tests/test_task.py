@@ -337,13 +337,13 @@ class TestFileDependencies:
 
 
 def changed_env(task, force=False) -> dict[str, str]:
-    """PDP_CHANGED_ vars passed to the entrypoint"""
+    """PDP_CHANGED and PDP_CHANGED_<ID> vars passed to the entrypoint"""
     # stub a successful exit code
     ok = subprocess.CompletedProcess(args=[], returncode=0)
     with patch("subprocess.run", return_value=ok) as mock_run:
         task.run(force=force)
     env = mock_run.call_args.kwargs["env"]
-    return {key: value for key, value in env.items() if key.startswith("PDP_CHANGED_")}
+    return {key: value for key, value in env.items() if key.startswith("PDP_CHANGED")}
 
 
 @pytest.fixture
@@ -361,7 +361,7 @@ class TestChangedInputs:
         touch(import_task.output_folder / "b.csv", 3000)
 
         expect(changed_env(clean)).to(
-            equal({"PDP_CHANGED_IMPORT": "input/import/b.csv"})
+            equal({"PDP_CHANGED": "", "PDP_CHANGED_IMPORT": "input/import/b.csv"})
         )
 
     @pytest.mark.parametrize(
@@ -404,10 +404,20 @@ class TestChangedInputs:
         expect(changed_env(clean)).to(
             equal(
                 {
+                    "PDP_CHANGED": "",
                     "PDP_CHANGED_IMPORT1": "",
                     "PDP_CHANGED_IMPORT2": "input/import2/data2.csv",
                 }
             )
+        )
+
+    def test_own_input_change_lists_only_itself_in_pdp_changed(self, clean_takes_two_csvs):
+        _, clean = clean_takes_two_csvs
+        touch(clean.input_folder / "old.csv", 1000)
+        touch(clean.input_folder / "new.csv", 3000)
+
+        expect(changed_env(clean)).to(
+            equal({"PDP_CHANGED": "input/new.csv", "PDP_CHANGED_IMPORT": ""})
         )
 
 

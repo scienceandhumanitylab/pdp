@@ -102,6 +102,7 @@ class Task:
 
         # Create env path to dependency outputs in case symlink fails (Windows, Slurm)
         root = find_project_root(config_name="pdp.yml", start=self.task_directory)
+        changed, own_changed = self.changed_inputs(root, force)
         env = (
             os.environ  # everything available already, merge with...
             | {  # one per dep
@@ -109,9 +110,9 @@ class Task:
                 for dep in self.depends_on
             }
             | {  # one per dep
-                changed_env_var(dep): "\n".join(paths)
-                for dep, paths in self.changed_inputs(root, force).items()
+                changed_env_var(dep): "\n".join(paths) for dep, paths in changed.items()
             }
+            | {"PDP_CHANGED": "\n".join(own_changed)}
         )
 
         # Snapshot to be able to revert changes
@@ -256,17 +257,18 @@ class Task:
             for dep, matched in files.items()
         }
 
-    def changed_inputs(self, root: Path, force: bool = False) -> dict[str, list[str]]:
-        """For each dependency, gets dict of files that are newer than task's outputs
+    def changed_inputs(
+        self, root: Path, force: bool = False
+    ) -> tuple[dict[str, list[str]], list[str]]:
+        """Changed files for the entrypoint, as its env vars list them.
 
-        Returns every file if forced, output dir is empty, or task files changed
-        (task.yml or src/*). Called before entrypoint
+        Returns:
+            Per dependency, the files newer than the task's newest output (PDP_CHANGED_<ID>).
+            The task's own input files (PDP_CHANGED). When forced, output empty, or task code changes, includes every file.
         """
 
         task_mtime = latest_mtime_in_dir(self.output_folder)
-        full = (
-            force or task_mtime is None or self._own_files_newer_than(task_mtime, root)
-        )
+        full = force or task_mtime is None or self._code_newer_than(task_mtime)
 
         changed = {}
         for dep, files in self.dependency_files(root).items():
@@ -278,7 +280,13 @@ class Task:
                 for file in files
                 if full or file.stat().st_mtime > task_mtime
             ]
-        return changed
+
+        own = [
+            path.relative_to(self.task_directory).as_posix()
+            for path in self._own_inputs(root)
+            if full or path.stat().st_mtime > task_mtime
+        ]
+        return changed, own
 
     @property
     def description(self) -> str:
@@ -343,15 +351,21 @@ class Task:
         return self._own_files_newer_than(task_mtime, root)
 
     def _own_files_newer_than(self, mtime: float, root: Path) -> bool:
-        """Any file the task owns that are newer than mtime."""
-        links = [
-            dep
-            for dep in self.depends_on
-            if _pdp_owns(self.input_folder / dep, self.depends_on, root)
-        ]
+        """Any file the task owns that is newer than mtime.
+
+        Includes its code or its own inputs."""
+        if self._code_newer_than(mtime):
+            return True
+        return any(path.stat().st_mtime > mtime for path in self._own_inputs(root))
+
+    def _code_newer_than(self, mtime: float) -> bool:
+        """src/, hand/ or root files newer than mtime. hand/ counts as code.
+
+        Currently assumes hand made corrections apply across all files. Should
+        revisit this and consider treating hand files like input files?
+        """
         for folder_mtime in (
             latest_mtime_in_dir(self.src_folder),
-            latest_mtime_in_dir(self.input_folder, skip=links),
             latest_mtime_in_dir(self.task_directory / "hand"),
         ):
             if folder_mtime is not None and folder_mtime > mtime:
@@ -367,3 +381,28 @@ class Task:
                 return True
 
         return False
+
+    def _own_inputs(self, root: Path) -> list[Path]:
+        """Files under input/ that are the task's own, not pdp links.
+
+        'Own' means not an input/<dep> entry pdp created (_pdp_owns).
+        Follows files and file symlinks. Skips broken symlinks.
+        Does not follow directory symlinks
+        """
+        if not self.input_folder.is_dir():
+            return []
+        owned = [
+            entry.name
+            for entry in self.input_folder.iterdir()
+            if _pdp_owns(entry, self.depends_on, root)
+        ]
+        own = []
+        for dirpath, dirs, files in os.walk(self.input_folder):
+            if dirpath == os.fspath(self.input_folder):
+                dirs[:] = [d for d in dirs if d not in owned]
+                files = [f for f in files if f not in owned]
+            for file in files:
+                path = Path(dirpath, file)
+                if path.exists():  # follows file symlinks, skips broken ones
+                    own.append(path)
+        return sorted(own)

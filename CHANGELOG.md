@@ -27,12 +27,15 @@ When merging to main:
   specific files, or multiple files with a wildcard pattern (`import/*.csv`), or
   a named output group (`import:csvs`). In either new case, staleness is only
   determined by the files referenced.
-- `PDP_CHANGED_<ID>` is made available to every entrypoint, with an entry for
-  every dependency files changed since the last run. This makes it possible (but
-  optional) to pull the env var in a source file and use it to rerun only parts
-  of the task.
+- `PDP_CHANGED_<ID>` is made available to every entrypoint with a dependency,
+  with an entry for every dependency file changed since the last run. This makes
+  it possible (but optional) to pull the env var in a source file and use it to
+  rerun only parts of the task.
+- `PDP_CHANGED` lists a task's own `input/` files that changed since the last
+  run. Tasks that loop over raw input files can rerun only those, just like with
+  `PDP_CHANGED_<ID>` for tasks with a dependency.
 - `pdp validate` warns when a `depends_on` pattern matches no files while the
-  dependency it references is not stale.
+  dependency it references is fresh.
 
 ### Changed
 
