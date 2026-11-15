@@ -2,10 +2,9 @@ from pathlib import Path
 
 import pytest
 from expects import *
-from ruamel.yaml import YAML
-
 from pdp.pdp_config import PDPConfig, TaskConfig
 from pdp.utils import TASK_NAME_RULE
+from ruamel.yaml import YAML
 
 
 @pytest.fixture
@@ -216,7 +215,7 @@ class TestSlurmConfig:
 
 
 class TestDependencyConfig:
-    def test_narrowed_entries_and_groups_are_valid(self, fs):
+    def test_file_dep_entries_and_groups_are_valid(self, fs):
         write_config_file(
             "task.yml",
             {

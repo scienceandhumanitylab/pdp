@@ -5,11 +5,11 @@ from unittest.mock import ANY, patch
 
 import pytest
 from expects import *
+from pdp.pdp_errors import InvalidConfigError
+from pdp.task import Task
 from ruamel.yaml import YAML
 
 from pdp.pdp import PDP, PDPConfig
-from pdp.pdp_errors import InvalidConfigError
-from pdp.task import Task
 from tests.helpers import backdate_task_yml, write_task_yml
 
 
@@ -81,7 +81,7 @@ class TestValidate:
             contain(contain("import has no output group called 'pdfs'"))
         )
 
-    def test_whole_and_narrowed_same_task_is_rejected(self, import_and_clean_project):
+    def test_whole_and_file_dep_same_task_is_rejected(self, import_and_clean_project):
         write_task_yml("clean", depends_on=["import", "import/*.csv"])
 
         expect(import_and_clean_project.validation_errors()).to(
@@ -427,6 +427,7 @@ class TestSymlinks:
         self, import_and_clean_project
     ):
         Path("clean/input/import").mkdir()
+        Path("clean/input/import/mine.csv").write_text("mine")
 
         errors = import_and_clean_project.validation_errors()
 
@@ -452,6 +453,78 @@ class TestSymlinks:
         )
 
         expect(import_and_clean_project.run_task("clean").exit_code).to(equal(0))
+
+
+@pytest.fixture
+def file_dep_project(import_and_clean_project):
+    """clean depends on import/*.csv. import wrote a.csv, sub/b.csv and notes.txt"""
+    for name in ("a.csv", "sub/b.csv", "notes.txt"):
+        Path("import/output", name).parent.mkdir(parents=True, exist_ok=True)
+        Path("import/output", name).write_text(name)
+    write_task_yml("clean", depends_on=["import/*.csv", "import/sub/*.csv"])
+    return import_and_clean_project
+
+
+def files_under(folder):
+    return sorted(
+        str(path.relative_to(folder))
+        for path in Path(folder).rglob("*")
+        if not path.is_dir()
+    )
+
+
+class TestFileDepSymlinks:
+    def test_links_only_matched_files_with_relative_targets(self, file_dep_project):
+        file_dep_project.scaffold()
+
+        expect(files_under("clean/input/import")).to(equal(["a.csv", "sub/b.csv"]))
+        expect(os.readlink("clean/input/import/sub/b.csv")).to(
+            equal("../../../../import/output/sub/b.csv")
+        )
+        expect(Path("clean/input/import/sub/b.csv").read_text()).to(equal("sub/b.csv"))
+        expect(file_dep_project.validation_errors()).to(equal([]))
+
+    def test_relinking_picks_up_new_files_and_leaves_targets(self, file_dep_project):
+        file_dep_project.scaffold()
+        Path("import/output/c.csv").write_text("c")
+
+        file_dep_project.scaffold()
+
+        expect(files_under("clean/input/import")).to(
+            equal(["a.csv", "c.csv", "sub/b.csv"])
+        )
+        expect(files_under("import/output")).to(
+            equal(["a.csv", "c.csv", "notes.txt", "sub/b.csv"])
+        )
+
+    def test_switch_whole_to_file_dep_to_whole(self, file_dep_project):
+        write_task_yml("clean", depends_on=["import"])
+        file_dep_project.scaffold()
+        expect(Path("clean/input/import").is_symlink()).to(be_true)
+
+        write_task_yml("clean", depends_on=["import/*.csv"])
+        file_dep_project.scaffold()
+        expect(files_under("clean/input/import")).to(equal(["a.csv"]))
+
+        write_task_yml("clean", depends_on=["import"])
+        file_dep_project.scaffold()
+        expect(os.readlink("clean/input/import")).to(equal("../../import/output"))
+        expect(files_under("import/output")).to(
+            equal(["a.csv", "notes.txt", "sub/b.csv"])
+        )
+
+    def test_user_file_in_file_dep_dir_is_left_alone_and_reported(
+        self, file_dep_project
+    ):
+        file_dep_project.scaffold()
+        Path("clean/input/import/mine.csv").write_text("mine")
+
+        file_dep_project.scaffold()
+
+        expect(Path("clean/input/import/mine.csv").read_text()).to(equal("mine"))
+        expect(file_dep_project.validation_errors()).to(
+            contain(contain("input/import"))
+        )
 
 
 class TestDependencyEnvPaths:

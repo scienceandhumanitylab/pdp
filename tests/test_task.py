@@ -5,9 +5,9 @@ from unittest.mock import ANY, patch
 
 import pytest
 from expects import *
+from pdp.task import Task, latest_mtime_in_dir
 from ruamel.yaml import YAML
 
-from pdp.task import Task, latest_mtime_in_dir
 from tests.helpers import backdate_task_yml, write_task_yml
 
 

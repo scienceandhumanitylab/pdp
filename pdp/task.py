@@ -64,27 +64,35 @@ class Task:
     def create_symlinks(self, task_ids: set[str]) -> None:
         """Symlink into task input/ the outputs of dependent tasks.
 
-        First, removes any existing symlinks that PDP created, so links
-        to folders that no longer exist are pruned. Only removes what
-        is demonstrably its own - symlink, named after task, target inside project.
-        Then declares new symlinks.
+        First, removes any existing links that PDP created, so links
+        to folders that no longer exist are removed. Only removes what
+        `_pdp_owns`. Then declares new links, one dir link per task 
+        dep, a dir of file links per file dep.
 
         Args:
             task_ids: Set of task ids as strings
         """
         root = find_project_root(config_name="pdp.yml", start=self.task_directory)
         for entry in self.input_folder.iterdir():
-            if (
-                # confirm PDP owns it
-                entry.name in task_ids
-                and entry.is_symlink()
-                and entry.resolve().is_relative_to(root)
-            ):
-                entry.unlink()
+            if _pdp_owns(entry, task_ids, root):
+                if entry.is_symlink():
+                    entry.unlink()
+                else:
+                    shutil.rmtree(entry)
 
-        for dep in self.depends_on:
+        for dep, files in self.dependency_files(root).items():
+            link_dir = self.input_folder / dep
             try:
-                (self.input_folder / dep).symlink_to(Path("..", "..", dep, "output"))
+                if files is None:
+                    link_dir.symlink_to(Path("..", "..", dep, "output"))
+                    continue
+                if link_dir.exists():  # user added
+                    continue
+                link_dir.mkdir()
+                for file in files:
+                    link = link_dir / file.relative_to(root / dep / "output")
+                    link.parent.mkdir(parents=True, exist_ok=True)
+                    link.symlink_to(os.path.relpath(file, link.parent))
             except OSError as e:  # catch Windows - can't symlink without privilege
                 warnings.warn(f"{self.task_id}: could not link input/{dep}: {e}")
 
@@ -173,7 +181,15 @@ class Task:
 
         for dep in self.depends_on:
             link = self.input_folder / dep
-            if not link.is_symlink() and link.exists():
+            if (
+                not link.is_symlink()
+                and link.exists()
+                and not _pdp_owns(
+                    link,
+                    self.depends_on,
+                    find_project_root("pdp.yml", start=self.task_directory),
+                )
+            ):
                 errors.append(
                     f"input/{dep} is a real file or directory, not a dependency link"
                 )
@@ -210,18 +226,18 @@ class Task:
             if not isinstance(entry, str):
                 continue
             dep, pattern, group = parse_dependency(entry)
-            if pattern is None and group is None:
+            if group is not None:
+                groups = Task(dep, root / dep).task_config.output_groups
+                if group not in groups:
+                    raise ValueError(f"{dep} has no output group {group!r}")
+                pattern = groups[group]
+            if pattern is None:
                 files[dep] = None
                 continue
 
             matched = files.setdefault(dep, set())
             if matched is None:  # whole task covers this
                 continue
-            if group is not None:
-                groups = Task(dep, root / dep).task_config.output_groups
-                if group not in groups:
-                    raise ValueError(f"{dep} has no output group {group!r}")
-                pattern = groups[group]
             matched.update(
                 path
                 for path in (root / dep / "output").glob(pattern)
