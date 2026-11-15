@@ -25,7 +25,7 @@ def backdate_task_yml(*tasks: Task) -> None:
 
 
 def touch(path: Path, mtime: float) -> None:
-    """Create the file with a chosen mtime, for staleness tests"""
+    """Create the file with given mtime"""
     path.touch()
     os.utime(path, (mtime, mtime))
 

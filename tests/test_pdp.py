@@ -7,7 +7,7 @@ import pytest
 from expects import *
 from ruamel.yaml import YAML
 
-from pdp.pdp import PDP, PDPConfig
+from pdp.pdp import PDP, FreshenReport, PDPConfig
 from pdp.pdp_errors import InvalidConfigError
 from pdp.task import Task
 from tests.helpers import backdate_task_yml, make_fresh, touch, write_task_yml
@@ -343,6 +343,7 @@ class TestSelect:
         expect(select(["clean"], only=True)).to(equal({"clean"}))
         expect(select(["import", "other"], only=True)).to(equal({"import", "other"}))
         expect(select([], from_="clean")).to(equal({"clean", "report"}))
+        expect(select(["clean"], downstream=True)).to(equal({"clean", "report"}))
         expect(select([], to="clean")).to(equal({"import", "clean"}))
         expect(select([], from_="import", to="report")).to(
             equal({"import", "clean", "report"})
@@ -832,3 +833,68 @@ class TestRunReport:
         result = import_and_clean_project.run_all()
 
         expect(result.ran).to(equal(["import", "clean"]))
+
+
+class TestFreshen:
+    """fresh_dag: import -> clean -> report, plus other. Outputs dated 100"""
+
+    def test_freshens_only_selection_and_reports_newly_stale(self, fresh_dag):
+        touch(Path("clean/src/script.py"), 200)
+
+        report = fresh_dag.freshen(fresh_dag.select(["clean"], only=True))
+
+        expect(report).to(equal(FreshenReport(["clean"], [], ["report"])))
+        expect(fresh_dag.flatten_tasks()["report"].is_stale).to(be_true)
+
+    def test_freshens_downstream_and_leaves_upstream_alone(self, fresh_dag):
+        touch(Path("clean/src/script.py"), 200)
+
+        report = fresh_dag.freshen(fresh_dag.select(["clean"], downstream=True))
+
+        expect(report).to(equal(FreshenReport(["clean", "report"])))
+        expect(Path("import/output/result.csv").stat().st_mtime).to(equal(100))
+
+    def test_touches_only_real_output_files(self, fresh_dag):
+        clean = fresh_dag.flatten_tasks()["clean"]
+        touch(clean.src_folder / "script.py", 200)
+        touch(clean.input_folder / "own.csv", 150)
+        (clean.output_folder / "link.csv").symlink_to(
+            Path("..", "..", "import", "output", "result.csv")
+        )
+
+        fresh_dag.freshen({"clean"})
+
+        expect((clean.src_folder / "script.py").stat().st_mtime).to(equal(200))
+        expect((clean.input_folder / "own.csv").stat().st_mtime).to(equal(150))
+        expect(Path("import/output/result.csv").stat().st_mtime).to(equal(100))
+        expect((clean.output_folder / "result.csv").stat().st_mtime).to(be_above(200))
+
+    @pytest.mark.parametrize(
+        "setup, selection, error",
+        [
+            (lambda: touch(Path("import/src/script.py"), 200), {"clean"}, "upstream"),
+            (
+                lambda: Path("import/output/result.csv").unlink(),
+                {"import", "clean"},
+                "empty output",
+            ),
+        ],
+    )
+    def test_refusal_touches_nothing(self, fresh_dag, setup, selection, error):
+        setup()
+
+        with pytest.raises(ValueError, match=error):
+            fresh_dag.freshen(selection)
+
+        expect(Path("clean/output/result.csv").stat().st_mtime).to(equal(100))
+
+    def test_future_dated_file_leaves_task_still_stale(self, fresh_dag):
+        touch(Path("clean/src/script.py"), 4e9)
+
+        report = fresh_dag.freshen({"clean"})
+
+        expect(report.still_stale).to(equal(["clean"]))
+        expect(report.exit_code).to(equal(1))
+
+    def test_all_fresh_reports_nothing(self, fresh_dag):
+        expect(fresh_dag.freshen(fresh_dag.select([]))).to(equal(FreshenReport()))

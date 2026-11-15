@@ -352,6 +352,53 @@ def clean(task_ids: TaskIds = None, from_: From = None, to: To = None) -> None:
 
 
 @app.command()
+def freshen(
+    task_ids: TaskIds = None,
+    only: Only = False,
+    from_: From = None,
+    to: To = None,
+) -> None:
+    """Make stale tasks fresh without running them by setting their output file times to now.
+
+    Use freshen when you make an inconsequential change and don't want the entire downstream to go stale. Changing comments in a src/ file is a good example. By default, this will invalidate everything downstream of the task, even though nothing changed.  Freshen can fix that.
+
+    Freshen uses the same flags as `pdp run`, except that task ids select the task and everything downstream of it, not its upstream. Freshen a stale upstream by naming it. Use `--only` to freshen just the given tasks.  This only works when you run it, and the freshness will not persist.  Any further changes will invalidate the downstream again. Note that this is a bit hacky. But if used scrupulously, it gives you some flexibility to step outside the pdp framework when it isn't serving you."""
+
+    pdp = load_pdp()
+
+    try:
+        if not (task_ids or from_ or to) and pdp.current_path != Path("."):
+            current_task = pdp.current_task
+
+            if current_task is None:
+                err_console.print(f"No task at {pdp.current_path}.")
+                raise typer.Exit(1)
+
+            task_ids = [current_task.task_id]
+
+        report = pdp.freshen(
+            pdp.select(task_ids or [], only, from_, to, downstream=True)
+        )
+    except ValueError as e:
+        err_console.print(str(e))
+        raise typer.Exit(1)
+
+    if report.freshened:
+        console.print(f"Freshened: {', '.join(report.freshened)}")
+    if report.still_stale:
+        err_console.print(f"Still stale: {', '.join(report.still_stale)}")
+    if report.newly_stale:
+        err_console.print(
+            f"Freshening made other tasks stale: {', '.join(report.newly_stale)}\n"
+            f"Freshen them too with: pdp freshen --from {report.newly_stale[0]}"
+        )
+    if not (report.freshened or report.still_stale or report.newly_stale):
+        console.print("Nothing to freshen.")
+
+    raise typer.Exit(report.exit_code)
+
+
+@app.command()
 @app.command("t", hidden=True)
 def tree() -> None:
     """Print the task tree as flat list with dependencies."""

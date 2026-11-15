@@ -320,6 +320,13 @@ assets in the UI. Alternatively, use any of the `pdp run` commands followed by
 - Run `pdp validate` to validate the project configuration.
 - Run `pdp clean` to delete each task's `clean:` files from `task.yml`, like
   `clean: [output/*]`.
+- Run `pdp freshen <task>` to make one or more stale tasks fresh without running
+  them. Bit hacky, but it gives you some flexibility to fix things when you know
+  they should still be fresh. For example, when you change a comment in a `src/`
+  file and everything downstream goes stale. Unlike `pdp run`,
+  `pdp freshen clean` selects `clean` and everything downstream of it, not its
+  upstream. Use `pdp freshen clean --only` for just that task, or
+  `pdp freshen --from import --to clean` for a range.
 
 ## Development
 

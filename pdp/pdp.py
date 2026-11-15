@@ -1,3 +1,5 @@
+import os
+import time
 from dataclasses import dataclass, field
 from graphlib import CycleError, TopologicalSorter
 from pathlib import Path
@@ -47,6 +49,22 @@ class RunReport:
     @property
     def exit_code(self) -> int:
         return 1 if self.failed or self.skipped or self.no_entrypoint else 0
+
+
+@dataclass
+class FreshenReport:
+    """Results of freshening a selection without running it.
+
+    Exit code is 1 when a selected task is still stale afterwards.
+    """
+
+    freshened: list[str] = field(default_factory=list)
+    still_stale: list[str] = field(default_factory=list)
+    newly_stale: list[str] = field(default_factory=list)
+
+    @property
+    def exit_code(self) -> int:
+        return 1 if self.still_stale else 0
 
 
 class PDP:
@@ -233,8 +251,13 @@ class PDP:
         only: bool = False,
         from_: str | None = None,
         to: str | None = None,
+        downstream: bool = False,
     ) -> set[str]:
-        """Get set of task_ids to run based on selection flags."""
+        """Get set of task_ids to run based on selection flags.
+
+        downstream: task_ids bring in their dependents instead of their
+        dependencies (for pdp freshen).
+        """
         self._validate_or_raise()
         flattened = self.flatten_tasks()
 
@@ -249,7 +272,8 @@ class PDP:
         if task_ids:
             if only:
                 return set(task_ids)
-            return set().union(*(self._closure(flattened, tid) for tid in task_ids))
+            reach = self._descendants if downstream else self._closure
+            return set().union(*(reach(flattened, tid) for tid in task_ids))
 
         selection = set(flattened)
         if from_:
@@ -269,6 +293,56 @@ class PDP:
             for tid in self.ordered_tasks()
             if tid in deps - selection and flattened[tid].is_stale
         ]
+
+    def freshen(self, selection: set[str]) -> FreshenReport:
+        """Make each stale task in the selection fresh without running it."""
+        flattened = self.flatten_tasks()
+        full_order = self.ordered_tasks()
+        order = [tid for tid in full_order if tid in selection]
+        stale = [tid for tid in order if flattened[tid].is_stale]
+
+        empty = [
+            tid
+            for tid in stale
+            if latest_mtime_in_dir(flattened[tid].output_folder) is None
+        ]
+        if empty:
+            raise ValueError(
+                f"cannot freshen {', '.join(empty)}: "
+                "stale with an empty output/. Nothing to freshen"
+            )
+
+        upstream = self.stale_upstream(selection)
+        if upstream:
+            raise ValueError(
+                f"Stale upstream outside the selection: {', '.join(upstream)}\n"
+                f"Run with --from {upstream[0]} to include it."
+            )
+
+        now = time.time()
+        for tid in stale:
+            for dirpath, _, files in os.walk(flattened[tid].output_folder):
+                for file in files:
+                    path = os.path.join(dirpath, file)
+                    # a symlink's target is another task's file
+                    if not os.path.islink(path):
+                        os.utime(path, (now, now))
+
+        still_stale = [tid for tid in order if flattened[tid].is_stale]
+        dependents = {
+            tid
+            for tid, task in flattened.items()
+            if tid not in selection and any(dep in stale for dep in task.depends_on)
+        }
+        return FreshenReport(
+            freshened=[tid for tid in stale if tid not in still_stale],
+            still_stale=still_stale,
+            newly_stale=[
+                tid
+                for tid in full_order
+                if tid in dependents and flattened[tid].is_stale
+            ],
+        )
 
     def _run_many(
         self, flattened: dict[str, Task], task_ids, force: bool = False

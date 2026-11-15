@@ -17,7 +17,7 @@ When merging to main:
 3. Commit `pyproject.toml`, `uv.lock` and `CHANGELOG.md` in their own commit and
    merge to main
 4. Tag with `git tag -a v<version>-m "Release x.x.x"`, then
-   `git push origin main --folow-tags`.
+   `git push origin main --follow-tags`.
 
 ## [Unreleased]
 
@@ -36,6 +36,11 @@ When merging to main:
   `PDP_CHANGED_<ID>` for tasks with a dependency.
 - `pdp validate` warns when a `depends_on` pattern matches no files while the
   dependency it references is fresh.
+- `pdp freshen` makes stale tasks fresh without running them by setting their
+  output file times to now. Bit hacky, but good for a change you know doesn't
+  affect results, a comment in a `src/` file, and for generally making it easier
+  to force the framework to your will when needed. `pdp freshen <task>` also
+  freshens everything downstream of the task, not its upstream.
 
 ### Changed
 

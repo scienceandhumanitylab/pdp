@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 
 from pdp.cli import app
 from pdp.pdp import RunReport
-from tests.helpers import backdate_task_yml, make_fresh, write_task_yml
+from tests.helpers import backdate_task_yml, make_fresh, touch, write_task_yml
 
 
 @pytest.fixture
@@ -562,3 +562,45 @@ class TestClean:
 
         expect(first.stdout).to(equal("import: removed output/ran\n"))
         expect(second.stdout).to(equal("Nothing to clean.\n"))
+
+
+@pytest.mark.usefixtures("fresh_dag")
+class TestFreshenCli:
+    """fresh_dag: import -> clean -> report, plus other. Outputs dated 100"""
+
+    def freshen(self, *args):
+        return CliRunner(mix_stderr=False).invoke(app, ["freshen", *args])
+
+    @pytest.mark.parametrize(
+        "args, mtime, code, stdout, stderr",
+        [
+            (["clean"], 200, 0, "Freshened: clean, report\n", ""),
+            (["clean", "--only"], 200, 0, "Freshened: clean\n", "--from report"),
+            (["clean", "--only"], 4e9, 1, "", "Still stale: clean"),
+        ],
+    )
+    def test_prints_report(self, args, mtime, code, stdout, stderr):
+        touch(Path("clean/src/script.py"), mtime)
+
+        result = self.freshen(*args)
+
+        expect(result.exit_code).to(equal(code))
+        expect(result.stdout).to(equal(stdout))
+        expect(result.stderr).to(contain(stderr) if stderr else equal(""))
+
+    def test_refusal_prints_reason(self):
+        touch(Path("import/src/script.py"), 200)
+
+        result = self.freshen("clean")
+
+        expect(result.exit_code).to(equal(1))
+        expect(result.stderr).to(contain("Stale upstream outside the selection"))
+
+    def test_from_inside_task_directory_freshens_it(self):
+        touch(Path("clean/src/script.py"), 200)
+        os.chdir("clean")
+
+        expect(self.freshen().stdout).to(contain("Freshened: clean"))
+
+    def test_all_fresh_prints_nothing_to_freshen(self):
+        expect(self.freshen().stdout).to(equal("Nothing to freshen.\n"))

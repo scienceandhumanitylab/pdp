@@ -11,6 +11,7 @@ from tests.helpers import (
     backdate_task_yml,
     make_fresh,
     make_real_task,
+    touch,
     write_task_yml,
 )
 
@@ -184,6 +185,15 @@ def clean_reports_changed(real_pdp):
     )
 
     return real_pdp
+
+
+@pytest.fixture
+def fresh_dag(dag_project):
+    """dag_project with every task fresh, outputs dated 100"""
+    for task in dag_project.tasks:
+        backdate_task_yml(task)
+        touch(task.output_folder / "result.csv", 100)
+    return dag_project
 
 
 MOCK_SLURM = Path(__file__).parent / "mock_slurm"
