@@ -383,7 +383,7 @@ class TestRunner:
             result, run_dagster = self.invoke_run("--runner", "dagster")
 
         expect(result.exit_code).to(equal(1))
-        expect(result.stderr).to(contain("Dagster must be installed: `pdp[dagster]`"))
+        expect(result.stderr).to(contain("Dagster must be installed: `pdp-helper[dagster]`"))
         run_dagster.assert_not_called()
 
 
@@ -608,7 +608,7 @@ class TestDagsterCli:
             result, popen = run_dagster_dev()
 
         expect(result.exit_code).to(equal(1))
-        expect(result.stderr).to(contain("Dagster must be installed: `pdp[dagster]`"))
+        expect(result.stderr).to(contain("Dagster must be installed: `pdp-helper[dagster]`"))
         popen.assert_not_called()
 
     @pytest.mark.usefixtures("real_pdp")

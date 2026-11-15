@@ -1203,8 +1203,8 @@ wheels = [
 ]
 
 [[package]]
-name = "pdp"
-version = "0.2.4"
+name = "pdp-helper"
+version = "0.2.5"
 source = { editable = "." }
 dependencies = [
     { name = "rich" },
@@ -1222,7 +1222,7 @@ dagster = [
 dev = [
     { name = "expects" },
     { name = "ipython" },
-    { name = "pdp", extra = ["dagster"] },
+    { name = "pdp-helper", extra = ["dagster"] },
     { name = "pyfakefs" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -1242,7 +1242,7 @@ provides-extras = ["dagster"]
 dev = [
     { name = "expects", specifier = ">=0.9.0,<0.10.0" },
     { name = "ipython", specifier = ">=9.1.0,<10.0.0" },
-    { name = "pdp", extras = ["dagster"], editable = "." },
+    { name = "pdp-helper", extras = ["dagster"], editable = "." },
     { name = "pyfakefs", specifier = ">=5.8.0,<6.0.0" },
     { name = "pytest", specifier = ">=8.3.5,<9.0.0" },
     { name = "pytest-cov", specifier = ">=7.1.0,<8.0.0" },

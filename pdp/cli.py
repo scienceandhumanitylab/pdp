@@ -41,7 +41,7 @@ console = Console()
 
 
 def _print_version():
-    rprint(pkg_version("pdp"))
+    rprint(pkg_version("pdp-helper"))
 
 
 def _version_callback(value: bool):
@@ -223,7 +223,7 @@ Force = Annotated[
 
 def _require_dagster() -> None:
     if importlib.util.find_spec("dagster") is None:
-        err_console.print("Dagster must be installed: `pdp\\[dagster]`.")
+        err_console.print("Dagster must be installed: `pdp-helper\\[dagster]`.")
         raise typer.Exit(1)
 
 

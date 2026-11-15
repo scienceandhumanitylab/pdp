@@ -39,8 +39,9 @@ projects (see [Usage](#usage)).
 
 ## Install
 
-Soon to be available on PyPI. Meanwhile, we recommend installing with
-[uv](https://docs.astral.sh/uv/). First, install uv if needed:
+pdp is on PyPI as [`pdp-helper`](https://pypi.org/project/pdp-helper/). We
+recommend installing with [uv](https://docs.astral.sh/uv/). First, install uv if
+needed:
 
 ```sh
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -49,21 +50,21 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 Then use uv to install pdp:
 
 ```sh
-uv tool install "pdp[dagster] @ git+https://github.com/scienceandhumanitylab/pdp"
+uv tool install "pdp-helper[dagster]"
 ```
 
 Alternatively, if you want to keep things slim and don't care for Dagster, you
 can install just the core pdp features:
 
 ```sh
-uv tool install "pdp @ git+https://github.com/scienceandhumanitylab/pdp"
+uv tool install pdp-helper
 ```
 
 As new features are added, remember to upgrade to the most recent version of
 pdp:
 
 ```sh
-uv tool upgrade pdp
+uv tool upgrade pdp-helper
 ```
 
 pdp can then be run from the command line with:
@@ -91,10 +92,10 @@ To install with pipx:
 python -m pip install --user pipx
 
 # install pdp
-pipx install git+https://github.com/scienceandhumanitylab/pdp.git
+pipx install pdp-helper
 
 # upgrade pdp
-pipx upgrade pdp
+pipx upgrade pdp-helper
 
 # run pdp
 pdp
@@ -108,10 +109,10 @@ pipx install poetry
 pipx upgrade poetry
 
 # Install pdp
-poetry add git+https://github.com/scienceandhumanitylab/pdp.git
+poetry add pdp-helper
 
 # Update pdp
-poetry update pdp
+poetry update pdp-helper
 
 # Run pdp
 poetry run pdp
@@ -358,7 +359,7 @@ If working with branches that are ahead of the latest release tag, add a pinned
 version to the `.env`:
 
 ```sh
-PDP_REMOTE_SPEC="pdp[dagster] @ git+https://github.com/scienceandhumanitylab/pdp@<sha>"
+PDP_REMOTE_SPEC="pdp-helper[dagster] @ git+https://github.com/scienceandhumanitylab/pdp@<sha>"
 ```
 
 Guidelines

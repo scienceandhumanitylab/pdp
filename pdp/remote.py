@@ -75,9 +75,8 @@ def parse_env(path: Path) -> dict[str, str]:
 
 
 def remote_version(env: dict[str, str]) -> str:
-    # TODO: remove this and use proper version once library is available
     return env.get("PDP_REMOTE_SPEC") or (
-        f"pdp[dagster] @ git+https://github.com/ChrisDonovan307/pdp@v{pkg_version('pdp')}"
+        f"pdp-helper[dagster]=={pkg_version('pdp-helper')}"
     )
 
 

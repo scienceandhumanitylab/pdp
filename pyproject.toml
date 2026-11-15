@@ -1,6 +1,6 @@
 [project]
-name = "pdp"
-version = "0.2.4"
+name = "pdp-helper"
+version = "0.2.5"
 description = "Principled Data Processing made easy"
 authors = [
     {name = "Sam Z",email = "shimian.zhang@gmail.com"}
@@ -30,7 +30,7 @@ dev = [
     "pyfakefs (>=5.8.0,<6.0.0)",
     "expects (>=0.9.0,<0.10.0)",
     "ipython (>=9.1.0,<10.0.0)",
-    "pdp[dagster]",
+    "pdp-helper[dagster]",
 ]
 
 [build-system]
@@ -40,6 +40,7 @@ build-backend = "uv_build"
 # The package lives at the project root (pdp/), not under src/.
 [tool.uv.build-backend]
 module-root = ""
+module-name = "pdp"
 
 [tool.pytest.ini_options]
 # Test warnings from PipesSubprocessClient.run
@@ -49,4 +50,4 @@ filterwarnings = [
 ]
 
 [tool.uv.sources]
-pdp = { workspace = true }
+pdp-helper = { workspace = true }

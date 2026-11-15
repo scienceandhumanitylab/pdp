@@ -21,6 +21,13 @@ When merging to main:
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-11-15
+
+### Changed
+
+- Published on PyPI as `pdp-helper` (`uv tool install "pdp-helper[dagster]"`).
+  The import package and CLI command are still `pdp`.
+
 ### Added
 
 - In addition to referencing an entire task in `depends_on`, you can reference

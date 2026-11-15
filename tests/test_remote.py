@@ -13,9 +13,7 @@ from typer.testing import CliRunner
 from pdp.cli import app
 from pdp.remote import SSH_OPTS, load_remote, parse_env, pull_args, push_args
 
-SPEC = (
-    f"pdp[dagster] @ git+https://github.com/ChrisDonovan307/pdp@v{pkg_version('pdp')}"
-)
+SPEC = f"pdp-helper[dagster]=={pkg_version('pdp-helper')}"
 
 
 @pytest.fixture(autouse=True)
