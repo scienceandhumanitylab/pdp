@@ -115,7 +115,7 @@ def real_dag(tmp_path):
 
 @pytest.fixture
 def dag_project(real_dag, tmp_path, monkeypatch):
-    """real_dag as an initialized PDP plus other with no edges, cwd at its root"""
+    """real_dag as an initialized PDP plus other with no dependencies, cwd at its root"""
     monkeypatch.chdir(tmp_path)
     pdp = PDP()
     pdp.initialize()

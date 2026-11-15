@@ -3,6 +3,7 @@ import subprocess
 from pathlib import Path
 from unittest.mock import ANY, patch
 
+import pytest
 from expects import *
 from ruamel.yaml import YAML
 
@@ -300,6 +301,62 @@ class TestStaleness:
         touch(real_task.task_directory / ".task.yml.swp", 2000)
 
         expect(real_task.is_stale).to(be_false)
+
+
+@pytest.fixture
+def clean_takes_csvs(import_and_clean):
+    """clean depends on import/*.csv. import wrote a.csv and notes.txt. Both fresh"""
+    import_task, clean = import_and_clean
+    write_task_yml("/clean", depends_on=["import/*.csv"])
+    backdate_task_yml(clean)
+    touch(import_task.output_folder / "a.csv", 1000)
+    touch(import_task.output_folder / "notes.txt", 1000)
+    touch(clean.output_folder / "result.csv", 2000)
+
+    return import_task, clean
+
+
+class TestFileDependencies:
+    def test_only_matched_files_make_task_stale(self, clean_takes_csvs):
+        import_task, clean = clean_takes_csvs
+
+        touch(import_task.output_folder / "notes.txt", 3000)
+        expect(clean.is_stale).to(be_false)
+
+        touch(import_task.output_folder / "a.csv", 3000)
+        expect(clean.is_stale).to(be_true)
+
+    def test_matching_no_files_is_stale(self, clean_takes_csvs):
+        import_task, clean = clean_takes_csvs
+        (import_task.output_folder / "a.csv").unlink()
+
+        expect(import_task.is_stale).to(be_false)
+        expect(clean.is_stale).to(be_true)
+
+    def test_output_group_works_like_pattern(self, clean_takes_csvs):
+        import_task, clean = clean_takes_csvs
+        write_task_yml("/import", output_groups={"csvs": "*.csv"})
+        write_task_yml("/clean", depends_on=["import:csvs"])
+        backdate_task_yml(import_task, clean)
+
+        touch(import_task.output_folder / "notes.txt", 3000)
+        expect(clean.is_stale).to(be_false)
+
+        touch(import_task.output_folder / "a.csv", 3000)
+        expect(clean.is_stale).to(be_true)
+
+    def test_input_skips_pdp_links_but_not_user_files(self, clean_takes_csvs):
+        import_task, clean = clean_takes_csvs
+        touch(import_task.output_folder / "notes.txt", 3000)
+        link_dir = clean.input_folder / "import"
+        link_dir.mkdir()
+        (link_dir / "notes.txt").symlink_to(
+            Path("..", "..", "..", "import", "output", "notes.txt")
+        )
+        expect(clean.is_stale).to(be_false)
+
+        touch(link_dir / "mine.csv", 3000)
+        expect(clean.is_stale).to(be_true)
 
 
 class TestSlurmFlags:

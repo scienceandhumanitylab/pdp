@@ -4,21 +4,42 @@ import os
 import shutil
 import subprocess
 import warnings
+from collections.abc import Collection
 from pathlib import Path
 
 from .pdp_config import TaskConfig
 from .utils import find_project_root, input_env_var, parse_dependency
 
 
-def latest_mtime_in_dir(dir: Path):
+def latest_mtime_in_dir(dir: Path, skip: Collection[str] = ()):
     mtimes = []
-    for root, _, files in os.walk(dir):
+    for root, dirs, files in os.walk(dir):
+        if root == os.fspath(dir):
+            dirs[:] = [d for d in dirs if d not in skip]
+            files = [f for f in files if f not in skip]
         for file in files:
             path = os.path.join(root, file)
-            if os.path.exists(path):  # follows file symlinks; skips broken ones
+            if os.path.exists(path):  # follows file symlinks, skips broken ones
                 mtimes.append(os.path.getmtime(path))
 
     return max(mtimes, default=None)
+
+
+def _pdp_owns(entry: Path, task_ids: Collection[str], root: Path) -> bool:
+    """Track what pdp owns so that we can prune symlinks, manage staleness, and validate"""
+    if entry.name not in task_ids:
+        return False
+    if entry.is_symlink():
+        return entry.resolve().is_relative_to(root)
+    if not entry.is_dir():
+        return False
+
+    for dirpath, dirs, files in os.walk(entry):
+        for name in files + [d for d in dirs if Path(dirpath, d).is_symlink()]:
+            link = Path(dirpath, name)
+            if not (link.is_symlink() and link.resolve().is_relative_to(root)):
+                return False
+    return True
 
 
 class Task:
@@ -182,6 +203,36 @@ class Task:
             )
         )
 
+    def dependency_files(self, root: Path) -> dict[str, list[Path] | None]:
+        """Takes clean dependency entries, returns a dict of dependency files"""
+        files: dict[str, set[Path] | None] = {}
+        for entry in self.dependency_entries:
+            if not isinstance(entry, str):
+                continue
+            dep, pattern, group = parse_dependency(entry)
+            if pattern is None and group is None:
+                files[dep] = None
+                continue
+
+            matched = files.setdefault(dep, set())
+            if matched is None:  # whole task covers this
+                continue
+            if group is not None:
+                groups = Task(dep, root / dep).task_config.output_groups
+                if group not in groups:
+                    raise ValueError(f"{dep} has no output group {group!r}")
+                pattern = groups[group]
+            matched.update(
+                path
+                for path in (root / dep / "output").glob(pattern)
+                if path.is_file()
+            )
+
+        return {
+            dep: None if matched is None else sorted(matched)
+            for dep, matched in files.items()
+        }
+
     @property
     def description(self) -> str:
         return self.task_config.description
@@ -231,16 +282,32 @@ class Task:
         if task_mtime is None:
             return True
 
-        # Check outputs older than input, src, hand, or a dependency's output.
-        # Missing/empty folders skipped
-        for folder in (
-            self.src_folder,
-            self.input_folder,
-            self.task_directory / "hand",
-            *(root / dep / "output" for dep in self.depends_on),
-        ):
-            mtime = latest_mtime_in_dir(folder)
+        # Check outputs older than the files each dependency takes
+        for dep, files in self.dependency_files(root).items():
+            if files is None:
+                mtime = latest_mtime_in_dir(root / dep / "output")
+            elif not files:
+                return True
+            else:
+                mtime = max(file.stat().st_mtime for file in files)
             if mtime is not None and mtime > task_mtime:
+                return True
+
+        return self._own_files_newer_than(task_mtime, root)
+
+    def _own_files_newer_than(self, mtime: float, root: Path) -> bool:
+        """Any file the task owns that are newer than mtime."""
+        links = [
+            dep
+            for dep in self.depends_on
+            if _pdp_owns(self.input_folder / dep, self.depends_on, root)
+        ]
+        for folder_mtime in (
+            latest_mtime_in_dir(self.src_folder),
+            latest_mtime_in_dir(self.input_folder, skip=links),
+            latest_mtime_in_dir(self.task_directory / "hand"),
+        ):
+            if folder_mtime is not None and folder_mtime > mtime:
                 return True
 
         # Check files at task root. Skip hidden files, swaps
@@ -248,7 +315,7 @@ class Task:
             if (
                 file.is_file()
                 and not file.name.startswith(".")
-                and file.stat().st_mtime > task_mtime
+                and file.stat().st_mtime > mtime
             ):
                 return True
 
