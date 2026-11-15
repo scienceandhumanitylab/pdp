@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 
 from pdp.cli import app
 from pdp.pdp import RunReport
-from tests.helpers import backdate_task_yml, write_task_yml
+from tests.helpers import backdate_task_yml, make_fresh, write_task_yml
 
 
 @pytest.fixture
@@ -86,7 +86,7 @@ class TestCreateCli:
 
 
 class TestRunCli:
-    def test_runs_current_task(self, runner, fs):
+    def test_runs_fresh_task(self, runner, fs):
         result = runner.invoke(app, ["create", "hello"])
 
         os.chdir("hello")
@@ -180,7 +180,7 @@ class TestRunCli:
         expect(result.exit_code).to(equal(0))
         expect((task.output_folder / "ran").exists()).to(be_true)
 
-    def test_run_prints_current_and_entrypointless_tasks(self, real_pdp):
+    def test_run_prints_fresh_and_entrypointless_tasks(self, real_pdp):
         fresh = real_pdp.create_task("fresh")
         write_task_yml("fresh", entrypoint="touch output/ran")
         backdate_task_yml(fresh)
@@ -190,7 +190,7 @@ class TestRunCli:
         result = CliRunner(mix_stderr=False).invoke(app, ["run"])
 
         expect(result.exit_code).to(equal(1))
-        expect(result.stdout).to(contain("Current: fresh"))
+        expect(result.stdout).to(contain("Fresh: fresh"))
         expect(result.stderr).to(contain("No entrypoint (failed): hand"))
 
     def test_run_warns_when_success_wrote_no_output(self, real_pdp):
@@ -365,6 +365,20 @@ class TestRunner:
         run_dagster.assert_not_called()
 
 
+class TestValidateCli:
+    def test_validate_exits_zero_and_prints_warnings(self, import_and_clean_project):
+        make_fresh(import_and_clean_project, "import")
+        # a fresh output with no CSVs, so import/*.csv matches nothing
+        Path("import/output/result.csv").replace(Path("import/output/notes.txt"))
+        write_task_yml("clean", depends_on=["import/*.csv"])
+
+        result = CliRunner(mix_stderr=False).invoke(app, ["validate"])
+
+        expect(result.exit_code).to(equal(0))
+        expect(result.stdout).to(contain("Warning: clean/task.yml: import/*.csv"))
+        expect(result.stdout).to(contain("Valid."))
+
+
 class TestTreeCli:
     def test_tree_enumerates_tasks_as_flat_list(self, runner, fs):
         _ = runner.invoke(app, ["create", "hello", "world"])
@@ -379,6 +393,14 @@ class TestTreeCli:
 """
             )
         )
+
+    def test_tree_shows_dependency_entries_as_written(self, runner, fs):
+        _ = runner.invoke(app, ["create", "import", "clean"])
+        write_task_yml("/clean", depends_on=["import/*.csv"])
+
+        result = runner.invoke(app, ["tree"])
+
+        expect(result.stdout).to(contain("<- import/*.csv"))
 
 
 class TestStatusCli:
@@ -410,6 +432,20 @@ class TestStatusCli:
         imp, clean = status["tasks"]
         expect(imp).to(have_keys(stale=True, depends_on=[], description="Load data"))
         expect(clean).to(have_keys(stale=True, depends_on=["import"], slurm={}))
+
+    def test_status_shows_dependency_entries_as_written(self, import_and_clean_project):
+        write_task_yml("clean", depends_on=["import/*.csv"])
+
+        result = CliRunner(mix_stderr=False).invoke(app, ["status", "-v"])
+
+        expect(result.stdout).to(contain("depends on: import/*.csv"))
+
+        # JSON keeps depends_on as Task IDs for tools like pdp-vscode
+        result = CliRunner(mix_stderr=False).invoke(app, ["status", "--json"])
+        clean = json.loads(result.stdout)["tasks"][1]
+        expect(clean).to(
+            have_keys(depends_on=["import"], dependency_entries=["import/*.csv"])
+        )
 
 
 class TestDagsterCli:

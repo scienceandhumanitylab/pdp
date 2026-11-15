@@ -116,6 +116,7 @@ poetry update pdp
 # Run pdp
 poetry run pdp
 ```
+
 ## Usage
 
 ### Editing an existing pdp project
@@ -147,7 +148,7 @@ poetry run pdp
 - Use `pdp run` from within a task to run that task. If in the project root,
   this runs all tasks.
 - Only stale tasks run. Add `--force` to rerun selected tasks even when they are
-  current.
+  fresh.
 - Use `pdp run <task>` to run a specific task.
 
 Select which tasks to run (`import -> clean -> analyze`):
@@ -165,6 +166,60 @@ Several IDs run the union of their selections, so `pdp run import other --only`
 runs both alone. If a selected task depends on a stale task outside the
 selection, `pdp run` refuses and suggests `--from <task>`. Add `--allow-stale`
 to run anyway.
+
+### Task Dependencies
+
+Each `task.yml` lists the tasks it needs in `depends_on`. pdp runs a task only
+after its dependencies, and symlinks each dependency's `output/` into the
+downstream task's `input/` as `input/<dependency>`:
+
+```yaml
+# clean/task.yml
+depends_on: [import]
+
+depends_on: # also valid formatting
+  - import
+```
+
+Alternatively, a `depends_on` entry can cite specific files with a wildcard
+pattern or output group:
+
+```yaml
+# import/task.yml
+output_groups:
+  csvs: "*.csv"
+
+# clean/task.yml
+depends_on:
+  - import/*.csv
+  - import:csvs
+```
+
+File dependencies only symlink matched files into `input/import/`, so the task
+only gets stale when those files change. Before the entrypoint runs, pdp sets
+the env var `PDP_CHANGED_<ID>` with the dependency files that changed since the
+task last ran.
+
+Let's say you have an `import` task with 10 input files and the task loops
+through them to produce 10 output files. A `clean` task depends on those files
+and produces 10 outputs of its own. You can optionally set up your source file
+in `clean` to read `PDP_CHANGED_<ID>` and run only the files that are stale:
+
+```python
+# clean/src/main.py
+
+changed_deps = os.environ.get("PDP_CHANGED_IMPORT")
+if changed_deps is None:                   # no env var means run everything
+  files = glob.glob("input/import/*.csv")  # same as task.yml entry
+else:
+  files = changed_deps.splitlines()        # list of changed files to run
+
+for path in files:
+  ...                                      # process only changed files
+```
+
+If you don't want to use this env var, you don't have to. Everything will work
+as normal otherwise.
 
 ### Run with Dagster
 

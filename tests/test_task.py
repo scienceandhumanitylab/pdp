@@ -1,23 +1,12 @@
-import os
 import subprocess
 from pathlib import Path
 from unittest.mock import ANY, patch
 
 import pytest
 from expects import *
+
 from pdp.task import Task, latest_mtime_in_dir
-from ruamel.yaml import YAML
-
-from tests.helpers import backdate_task_yml, write_task_yml
-
-
-def read_config_file(filename):
-    return dict(YAML().load(Path(filename)))
-
-
-def touch(path: Path, mtime: int):
-    path.touch()
-    os.utime(path, (mtime, mtime))
+from tests.helpers import backdate_task_yml, touch, write_task_yml
 
 
 class TestScaffold:
@@ -75,18 +64,6 @@ class TestDependsOn:
 
         expect(clean.depends_on).to(equal(["import"]))
         expect(clean.dependency_entries).to(equal(entries))
-
-
-class Validate:
-    def test_task_validate_raises_on_unscaffolded_task(self, task, fs):
-        errors = task.validation_errors()
-
-        expect(errors).to(contain("Missing key(s): depends_on, entrypoint, name"))
-        expect(errors).to(contain("name must be a non-empty string"))
-        expect(errors).to(contain("input/ folder is missing"))
-        expect(errors).to(contain("output/ folder is missing"))
-        expect(errors).to(contain("src/ folder is missing"))
-        expect(task.validate()).to(be_false)
 
 
 def test_task_id_is_directory_name(fs):
@@ -307,7 +284,7 @@ class TestStaleness:
 def clean_takes_csvs(import_and_clean):
     """clean depends on import/*.csv. import wrote a.csv and notes.txt. Both fresh"""
     import_task, clean = import_and_clean
-    write_task_yml("/clean", depends_on=["import/*.csv"])
+    write_task_yml("/clean", entrypoint="make", depends_on=["import/*.csv"])
     backdate_task_yml(clean)
     touch(import_task.output_folder / "a.csv", 1000)
     touch(import_task.output_folder / "notes.txt", 1000)
@@ -357,6 +334,81 @@ class TestFileDependencies:
 
         touch(link_dir / "mine.csv", 3000)
         expect(clean.is_stale).to(be_true)
+
+
+def changed_env(task, force=False) -> dict[str, str]:
+    """PDP_CHANGED_ vars passed to the entrypoint"""
+    # stub a successful exit code
+    ok = subprocess.CompletedProcess(args=[], returncode=0)
+    with patch("subprocess.run", return_value=ok) as mock_run:
+        task.run(force=force)
+    env = mock_run.call_args.kwargs["env"]
+    return {key: value for key, value in env.items() if key.startswith("PDP_CHANGED_")}
+
+
+@pytest.fixture
+def clean_takes_two_csvs(clean_takes_csvs):
+    """clean_takes_csvs plus b.csv"""
+    import_task, clean = clean_takes_csvs
+    touch(import_task.output_folder / "b.csv", 1000)
+
+    return import_task, clean
+
+
+class TestChangedInputs:
+    def test_lists_only_files_newer_than_output(self, clean_takes_two_csvs):
+        import_task, clean = clean_takes_two_csvs
+        touch(import_task.output_folder / "b.csv", 3000)
+
+        expect(changed_env(clean)).to(
+            equal({"PDP_CHANGED_IMPORT": "input/import/b.csv"})
+        )
+
+    @pytest.mark.parametrize(
+        ("full_because", "force"),
+        [("src changed", False), ("output empty", False), ("forced", True)],
+    )
+    def test_lists_all_matched_files(self, clean_takes_two_csvs, full_because, force):
+        _, clean = clean_takes_two_csvs
+        if full_because == "src changed":
+            touch(clean.src_folder / "script.py", 3000)
+        if full_because == "output empty":
+            (clean.output_folder / "result.csv").unlink()
+
+        expect(changed_env(clean, force=force)["PDP_CHANGED_IMPORT"]).to(
+            equal("input/import/a.csv\ninput/import/b.csv")
+        )
+
+    def test_task_dependency_lists_any_changed_output_file(self, import_and_clean):
+        import_task, clean = import_and_clean
+        write_task_yml("/clean", entrypoint="make", depends_on=["import"])
+        backdate_task_yml(clean)
+        (import_task.output_folder / "sub").mkdir()
+        touch(import_task.output_folder / "a.csv", 1000)
+        touch(import_task.output_folder / "notes.txt", 3000)
+        touch(import_task.output_folder / "sub" / "c.csv", 3000)
+        touch(clean.output_folder / "result.csv", 2000)
+
+        expect(changed_env(clean)["PDP_CHANGED_IMPORT"]).to(
+            equal("input/import/notes.txt\ninput/import/sub/c.csv")
+        )
+
+    def test_unchanged_dependency_is_set_but_empty(self, two_deps_and_clean):
+        import1, import2, clean = two_deps_and_clean
+        touch(import1.output_folder / "data1.csv", 1000)
+        touch(import2.output_folder / "data2.csv", 3000)
+        touch(clean.output_folder / "result.csv", 2000)
+        write_task_yml("/clean", entrypoint="make", depends_on=["import1", "import2"])
+        backdate_task_yml(clean)
+
+        expect(changed_env(clean)).to(
+            equal(
+                {
+                    "PDP_CHANGED_IMPORT1": "",
+                    "PDP_CHANGED_IMPORT2": "input/import2/data2.csv",
+                }
+            )
+        )
 
 
 class TestSlurmFlags:

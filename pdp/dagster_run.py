@@ -59,7 +59,7 @@ def _report(pdp: PDP, selection: set[str], result: dg.JobExecutionResult) -> Run
         if tid in materialized:
             metadata = materialized[tid]
             if not metadata["pdp/ran"].value:
-                report.current.append(tid)
+                report.fresh.append(tid)
                 continue
             report.ran.append(tid)
             if written := cast("list[str]", metadata["pdp/written"].value):

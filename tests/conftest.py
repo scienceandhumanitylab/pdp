@@ -7,7 +7,12 @@ import pytest
 from pdp.pdp import PDP
 from pdp.pdp_config import PDPConfig
 from pdp.task import Task
-from tests.helpers import backdate_task_yml, make_real_task, write_task_yml
+from tests.helpers import (
+    backdate_task_yml,
+    make_fresh,
+    make_real_task,
+    write_task_yml,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -163,6 +168,20 @@ def import_and_clean_project(real_pdp):
     real_pdp.create_task("import")
     real_pdp.create_task("clean")
     write_task_yml("clean", depends_on=["import"])
+
+    return real_pdp
+
+
+@pytest.fixture
+def clean_reports_changed(real_pdp):
+    """Both fresh; clean writes $PDP_CHANGED_IMPORT to output/changed.txt"""
+    make_fresh(real_pdp, "import")
+    make_fresh(
+        real_pdp,
+        "clean",
+        ["import"],
+        entrypoint='printf "%s" "$PDP_CHANGED_IMPORT" > output/changed.txt',
+    )
 
     return real_pdp
 

@@ -21,6 +21,11 @@ def input_env_var(task_id: str) -> str:
     return f"PDP_INPUT_{task_id.upper().replace('-', '_')}"
 
 
+def changed_env_var(task_id: str) -> str:
+    """Take clean input_env_var, swap for PDP_CHANGED_<ID>"""
+    return input_env_var(task_id).replace("PDP_INPUT_", "PDP_CHANGED_", 1)
+
+
 def find_project_root(config_name: str, start: Path | None = None) -> Path:
     """Walk up directories until you find config file. Starts by current cwd()
     by default, but can be given a path to accommodate using it Task.task_id

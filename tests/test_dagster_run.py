@@ -8,7 +8,7 @@ import pytest
 from expects import *
 
 from pdp.dagster_run import run_dagster
-from tests.helpers import make_current, write_task_yml
+from tests.helpers import make_fresh, write_task_yml
 
 
 class TestRunDagster:
@@ -43,7 +43,7 @@ class TestRunDagster:
         expect(runs[0].is_success).to(be_true)
 
     def test_report_sorts_each_task_by_outcome(self, real_pdp):
-        make_current(real_pdp, "current")
+        make_fresh(real_pdp, "fresh")
         real_pdp.create_task("no-entry")
         for tid, entrypoint, deps in [
             ("fails", "exit 1", ()),
@@ -61,7 +61,7 @@ class TestRunDagster:
                     "failed": ["fails"],
                     "skipped": ["after"],
                     "ran": ["empty"],
-                    "current": ["current"],
+                    "fresh": ["fresh"],
                     "no_entrypoint": ["no-entry"],
                     "no_output": ["empty"],
                     "written": {},

@@ -8,7 +8,7 @@ from collections.abc import Collection
 from pathlib import Path
 
 from .pdp_config import TaskConfig
-from .utils import find_project_root, input_env_var, parse_dependency
+from .utils import changed_env_var, find_project_root, input_env_var, parse_dependency
 
 
 def latest_mtime_in_dir(dir: Path, skip: Collection[str] = ()):
@@ -66,7 +66,7 @@ class Task:
 
         First, removes any existing links that PDP created, so links
         to folders that no longer exist are removed. Only removes what
-        `_pdp_owns`. Then declares new links, one dir link per task 
+        `_pdp_owns`. Then declares new links, one dir link per task
         dep, a dir of file links per file dep.
 
         Args:
@@ -96,15 +96,23 @@ class Task:
             except OSError as e:  # catch Windows - can't symlink without privilege
                 warnings.warn(f"{self.task_id}: could not link input/{dep}: {e}")
 
-    def run(self):
+    def run(self, force: bool = False):
         if not self.entrypoint:
             return 0
 
         # Create env path to dependency outputs in case symlink fails (Windows, Slurm)
         root = find_project_root(config_name="pdp.yml", start=self.task_directory)
-        env = os.environ | {
-            input_env_var(dep): str(root / dep / "output") for dep in self.depends_on
-        }
+        env = (
+            os.environ  # everything available already, merge with...
+            | {  # one per dep
+                input_env_var(dep): str(root / dep / "output")
+                for dep in self.depends_on
+            }
+            | {  # one per dep
+                changed_env_var(dep): "\n".join(paths)
+                for dep, paths in self.changed_inputs(root, force).items()
+            }
+        )
 
         # Snapshot to be able to revert changes
         before = self._output_snapshot()
@@ -204,9 +212,10 @@ class Task:
         return self.task_config.entrypoint
 
     @property
-    def dependency_entries(self) -> list:
-        """Clean dependency entries, after being parsed"""
-        return self.task_config.depends_on
+    def dependency_entries(self) -> list[str]:
+        """depends_on entries as written. Non-string entries fail validation,
+        so they are skipped here rather than crashing display code."""
+        return [e for e in self.task_config.depends_on if isinstance(e, str)]
 
     @property
     def depends_on(self) -> list[str]:
@@ -239,15 +248,37 @@ class Task:
             if matched is None:  # whole task covers this
                 continue
             matched.update(
-                path
-                for path in (root / dep / "output").glob(pattern)
-                if path.is_file()
+                path for path in (root / dep / "output").glob(pattern) if path.is_file()
             )
 
         return {
             dep: None if matched is None else sorted(matched)
             for dep, matched in files.items()
         }
+
+    def changed_inputs(self, root: Path, force: bool = False) -> dict[str, list[str]]:
+        """For each dependency, gets dict of files that are newer than task's outputs
+
+        Returns every file if forced, output dir is empty, or task files changed
+        (task.yml or src/*). Called before entrypoint
+        """
+
+        task_mtime = latest_mtime_in_dir(self.output_folder)
+        full = (
+            force or task_mtime is None or self._own_files_newer_than(task_mtime, root)
+        )
+
+        changed = {}
+        for dep, files in self.dependency_files(root).items():
+            output = root / dep / "output"
+            if files is None:
+                files = sorted(path for path in output.rglob("*") if path.is_file())
+            changed[dep] = [
+                Path("input", dep, file.relative_to(output)).as_posix()
+                for file in files
+                if full or file.stat().st_mtime > task_mtime
+            ]
+        return changed
 
     @property
     def description(self) -> str:

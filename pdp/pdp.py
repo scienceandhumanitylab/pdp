@@ -38,7 +38,7 @@ class RunReport:
     failed: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     ran: list[str] = field(default_factory=list)
-    current: list[str] = field(default_factory=list)
+    fresh: list[str] = field(default_factory=list)
     no_entrypoint: list[str] = field(default_factory=list)
     no_output: list[str] = field(default_factory=list)
     # task_id -> output/ files the run created or modified
@@ -134,6 +134,40 @@ class PDP:
 
     def validate(self) -> bool:
         return not self.validation_errors()
+
+    def validation_warnings(self) -> list[str]:
+        """Issues that warn but do not fail validation.
+
+        A file dependency matching zero files is normal before the
+        dependency has ever run, so it only warns when that task is
+        fresh. Runs never consult warnings.
+        """
+        if not self.initialized:
+            return []
+
+        warnings: list[str] = []
+        root = self.project_root
+        flattened = self.flatten_tasks()
+        for task_id, task in flattened.items():
+            try:
+                files = task.dependency_files(root)
+            except ValueError:  # unknown group: validation_errors reports it
+                continue
+            for entry in task.dependency_entries:
+                dep, pattern, group = parse_dependency(entry)
+                matched = files.get(dep)
+                if (
+                    dep not in flattened
+                    or (pattern is None and group is None)  # whole task
+                    or matched is None
+                    or matched  # some entry for this dep matched files
+                    or flattened[dep].is_stale  # zero matches is expected
+                ):
+                    continue
+                warnings.append(
+                    f"{task_id}/task.yml: {entry} matches no files in {dep}/output/"
+                )
+        return warnings
 
     def create_task(self, task_name: str) -> Task:
         if not is_valid_task_name(task_name):
@@ -259,11 +293,11 @@ class PDP:
                 report.no_entrypoint.append(tid)
                 continue
             if not (force or task.is_stale):
-                report.current.append(tid)
+                report.fresh.append(tid)
                 continue
             task.create_symlinks(all_task_ids)
             before = task._output_snapshot()
-            if task.run() != 0:
+            if task.run(force=force) != 0:
                 report.failed.append(tid)
                 continue
             report.ran.append(tid)
@@ -299,8 +333,8 @@ class PDP:
         for i, task_id in enumerate(self.ordered_tasks(), start=1):
             task = flattened[task_id]
             label = f"{i}. {task.task_id}"
-            if task.depends_on:
-                label += f" [dim] <- {', '.join(task.depends_on)}[/dim]"
+            if task.dependency_entries:
+                label += f" [dim] <- {', '.join(task.dependency_entries)}[/dim]"
             tree.add(label)
         return tree
 

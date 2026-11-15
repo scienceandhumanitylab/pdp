@@ -1,5 +1,6 @@
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import dagster as dg
@@ -16,7 +17,7 @@ from pdp.dagster_assets import (
 )
 from pdp.pdp_errors import InvalidConfigError
 from pdp.slurm_client import PdpSlurmClient
-from tests.helpers import make_current, write_task_yml
+from tests.helpers import make_fresh, touch, write_task_yml
 
 
 def materialize(
@@ -84,8 +85,8 @@ class TestAssetRuns:
         expect(ran(mats["import"])).to(be_true)
         expect(ran(mats["clean"])).to(be_true)
 
-    def test_stale_task_runs_after_a_current_dependent_task(self, real_pdp):
-        make_current(real_pdp, "import")
+    def test_stale_task_runs_after_a_fresh_dependent_task(self, real_pdp):
+        make_fresh(real_pdp, "import")
         real_pdp.create_task("clean")
         write_task_yml("clean", entrypoint="touch output/ran", depends_on=["import"])
 
@@ -97,9 +98,9 @@ class TestAssetRuns:
         expect(Path("import/output/ran").exists()).to(be_false)
         expect(Path("clean/output/ran").exists()).to(be_true)
 
-    def test_if_all_current_tasks_nothing_runs(self, real_pdp):
-        make_current(real_pdp, "import")
-        make_current(real_pdp, "clean", depends_on=["import"])
+    def test_if_all_fresh_tasks_nothing_runs(self, real_pdp):
+        make_fresh(real_pdp, "import")
+        make_fresh(real_pdp, "clean", depends_on=["import"])
 
         result = materialize(real_pdp)
 
@@ -110,13 +111,28 @@ class TestAssetRuns:
         expect(Path("import/output/ran").exists()).to(be_false)
         expect(Path("clean/output/ran").exists()).to(be_false)
 
-    def test_force_runs_a_current_task(self, real_pdp):
-        make_current(real_pdp, "task1")
+    def test_force_runs_a_fresh_task(self, real_pdp):
+        make_fresh(real_pdp, "task1")
 
         result = materialize(real_pdp, force=True)
 
         expect(ran(materializations(result)["task1"])).to(be_true)
         expect(Path("task1/output/ran").exists()).to(be_true)
+
+    @pytest.mark.parametrize(
+        ("force", "changed"),
+        [
+            (False, "input/import/new.csv"),
+            # forced import reruns too and writes output/ran
+            (True, "input/import/new.csv\ninput/import/ran\ninput/import/result.csv"),
+        ],
+    )
+    def test_force_reaches_task_run(self, clean_reports_changed, force, changed):
+        touch(Path("import/output/new.csv"), time.time() + 100)
+
+        materialize(clean_reports_changed, force=force)
+
+        expect(Path("clean/output/changed.txt").read_text()).to(equal(changed))
 
     def test_success_without_output_warns_in_metadata(self, real_pdp):
         real_pdp.create_task("task1")
@@ -167,17 +183,17 @@ class TestDataVersion:
             return mat.tags["dagster/data_version"]  # ty: ignore[not-subscriptable]
 
         # First run: stale, so it should run
-        # Second run: current, so it should skip
-        # Third run: current but force, so it should run
+        # Second run: fresh, so it should skip
+        # Third run: fresh but force, so it should run
         run_stale = materialize_and_version()
-        no_run_current = materialize_and_version()
-        force_current = materialize_and_version(force=True)
+        no_run_fresh = materialize_and_version()
+        force_fresh = materialize_and_version(force=True)
 
-        # no_run_current should not have changed data version
-        expect(no_run_current).to(equal(run_stale))
+        # no_run_fresh should not have changed data version
+        expect(no_run_fresh).to(equal(run_stale))
 
-        # force_current should have different data version
-        expect(force_current).not_to(equal(run_stale))
+        # force_fresh should have different data version
+        expect(force_fresh).not_to(equal(run_stale))
 
 
 class TestReconcile:
@@ -189,10 +205,10 @@ class TestReconcile:
     def observations(self, instance, task_id):
         return instance.fetch_observations(dg.AssetKey(task_id), limit=100).records
 
-    def test_current_task_without_dagster_history_gets_an_observation(
+    def test_fresh_task_without_dagster_history_gets_an_observation(
         self, real_pdp, instance
     ):
-        task = make_current(real_pdp, "task1")
+        task = make_fresh(real_pdp, "task1")
 
         reconcile(real_pdp, instance)
 
@@ -203,7 +219,7 @@ class TestReconcile:
         )
 
     def test_reconciling_twice_without_changes_does_nothing(self, real_pdp, instance):
-        make_current(real_pdp, "task1")
+        make_fresh(real_pdp, "task1")
 
         reconcile(real_pdp, instance)
         reconcile(real_pdp, instance)
@@ -220,7 +236,7 @@ class TestReconcile:
         expect(self.observations(instance, "task1")).to(have_len(0))
 
     def test_changes_to_output_creates_new_observation(self, real_pdp, instance):
-        task = make_current(real_pdp, "task1")
+        task = make_fresh(real_pdp, "task1")
         reconcile(real_pdp, instance)
 
         (task.output_folder / "result.csv").write_text("changed")
@@ -238,8 +254,8 @@ class TestReconcile:
         expect(self.observations(instance, "stale")).to(have_len(0))
         expect(self.observations(instance, "entrypointless")).to(have_len(0))
 
-    def test_current_task_does_not_write_a_materialization(self, real_pdp, instance):
-        make_current(real_pdp, "task1")
+    def test_fresh_task_does_not_write_a_materialization(self, real_pdp, instance):
+        make_fresh(real_pdp, "task1")
 
         reconcile(real_pdp, instance)
 

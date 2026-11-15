@@ -5,12 +5,12 @@ from unittest.mock import ANY, patch
 
 import pytest
 from expects import *
-from pdp.pdp_errors import InvalidConfigError
-from pdp.task import Task
 from ruamel.yaml import YAML
 
 from pdp.pdp import PDP, PDPConfig
-from tests.helpers import backdate_task_yml, write_task_yml
+from pdp.pdp_errors import InvalidConfigError
+from pdp.task import Task
+from tests.helpers import backdate_task_yml, make_fresh, touch, write_task_yml
 
 
 def read_config_file(filename):
@@ -96,6 +96,29 @@ class TestValidate:
         task2.task_config.update_config_key("depends_on", ["hello"])
 
         expect(pdp.validate()).to(be_false)
+
+
+class TestValidationWarnings:
+    def test_warns_when_file_dep_matches_nothing_and_dep_is_fresh(
+        self, import_and_clean_project
+    ):
+        make_fresh(import_and_clean_project, "import")
+        # a fresh output with no CSVs, so import/*.csv matches nothing
+        Path("import/output/result.csv").replace(Path("import/output/notes.txt"))
+        write_task_yml("clean", depends_on=["import/*.csv"])
+
+        expect(import_and_clean_project.validation_warnings()).to(
+            equal(["clean/task.yml: import/*.csv matches no files in import/output/"])
+        )
+
+    def test_no_warning_while_dep_is_stale(self, import_and_clean_project):
+        # import has never run: zero matches is normal, not a warning
+        write_task_yml("clean", depends_on=["import/*.csv"])
+
+        expect(import_and_clean_project.validation_warnings()).to(equal([]))
+
+    def test_whole_task_dep_never_warns(self, import_and_clean_project):
+        expect(import_and_clean_project.validation_warnings()).to(equal([]))
 
 
 class TestScaffoldTask:
@@ -582,6 +605,14 @@ class TestDependencyEnvPaths:
         expect(return_code.exit_code).to(equal(0))
         expect(Path("clean/output/copy.csv").read_text()).to(equal("hello\n"))
 
+    def test_forced_run_lists_every_dep_file_as_changed(self, clean_reports_changed):
+        clean_reports_changed.run_task("clean", force=True)
+
+        # forced import reruns and writes output/ran
+        expect(Path("clean/output/changed.txt").read_text()).to(
+            equal("input/import/ran\ninput/import/result.csv")
+        )
+
     def test_run_env_var_name_replaces_dash_with_underscore(self, real_pdp):
         real_pdp.create_task("clean-data")
         real_pdp.create_task("report")
@@ -738,7 +769,7 @@ class TestFailureCleanup:
         task = real_pdp.create_task("task1")
         for name in ("old.csv", "changed.csv"):
             (task.output_folder / name).write_text("good")
-            os.utime(task.output_folder / name, (1000, 1000))
+            touch(task.output_folder / name, 1000)
         (task.src_folder / "script.py").write_text("")
         write_task_yml(
             "task1",
@@ -753,22 +784,14 @@ class TestFailureCleanup:
 
 
 class TestForceRun:
-    def _fresh_task(self, real_pdp):
-        task = real_pdp.create_task("task1")
-        write_task_yml("task1", entrypoint="touch output/ran")
-        backdate_task_yml(task)
-        (task.output_folder / "result.csv").write_text("done")
-        expect(task.is_stale).to(be_false)
-        return task
-
     def test_run_skips_fresh_task_without_force(self, real_pdp):
-        task = self._fresh_task(real_pdp)
+        task = make_fresh(real_pdp, "task1")
         real_pdp.run_task("task1")
 
         expect((task.output_folder / "ran").exists()).to(be_false)
 
     def test_run_force_runs_fresh_task(self, real_pdp):
-        task = self._fresh_task(real_pdp)
+        task = make_fresh(real_pdp, "task1")
         real_pdp.run_task("task1", force=True)
 
         expect((task.output_folder / "ran").exists()).to(be_true)
@@ -780,7 +803,7 @@ class TestTaskDepValidation:
 
 
 class TestRunReport:
-    def test_run_report_has_current_and_entrypointless_tasks(self, real_pdp):
+    def test_run_report_has_fresh_and_entrypointless_tasks(self, real_pdp):
         fresh = real_pdp.create_task("fresh_task")
         write_task_yml("fresh_task", entrypoint="touch output/ran")
         backdate_task_yml(fresh)
@@ -789,7 +812,7 @@ class TestRunReport:
 
         result = real_pdp.run_all()
 
-        expect(result.current).to(equal(["fresh_task"]))
+        expect(result.fresh).to(equal(["fresh_task"]))
         expect(result.no_entrypoint).to(equal(["hand_only_task"]))
         expect(result.exit_code).to(equal(1))
 

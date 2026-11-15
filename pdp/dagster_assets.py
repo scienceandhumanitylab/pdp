@@ -79,8 +79,10 @@ def build_asset(
                 metadata={"pdp/ran": False}, data_version=output_data_version(task)
             )
 
-        # Run python -m pdp.pipes_wrapper <task_id> as subprocess through pipes
+        # Run python -m pdp.pipes_wrapper <task_id> [--force] as subprocess through pipes
         command = [sys.executable, "-m", "pdp.pipes_wrapper", task_id]
+        if pdp.force:
+            command.append("--force")
         cwd = str(project_root)
         before = task._output_snapshot()
         if isinstance(pipes, PdpSlurmClient):
@@ -144,7 +146,7 @@ def load_project(project_root: Path) -> PDP:
 
 
 def reconcile(pdp: PDP, instance: dg.DagsterInstance) -> None:
-    """Record dg observations for current tasks whose output changed outside
+    """Record dg observations for fresh tasks whose output changed outside
     of Dagster process.
 
     Runs every time definitions are loaded. Tasks which are stale or

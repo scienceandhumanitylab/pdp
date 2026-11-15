@@ -137,7 +137,10 @@ def validate():
     - Each task has an input/, output/, and src/ folder
     - Each task has a valid `task.yml`
     - Any `depends_on` references a valid task
-    - There are no dependency cyles in the project
+    - There are no dependency cycles in the project
+
+    Warns when a `depends_on` pattern matches no files
+    while the dependency it narrows is not stale.
     """
 
     pdp = load_pdp()
@@ -148,6 +151,9 @@ def validate():
         for error in errors:
             err_console.print(f"  {error}")
         raise typer.Exit(1)
+
+    for warning in pdp.validation_warnings():
+        console.print(f"Warning: {warning}")
 
     console.print("Valid.")
 
@@ -206,8 +212,8 @@ def _print_report(report: RunReport) -> None:
                     markup=False,
                     highlight=False,
                 )
-    if report.current:
-        console.print(f"Current: {', '.join(report.current)}")
+    if report.fresh:
+        console.print(f"Fresh: {', '.join(report.fresh)}")
     if report.no_output:
         err_console.print(
             f"Ran but wrote nothing to output/: {', '.join(report.no_output)}"
@@ -385,6 +391,7 @@ def status(
                 "id": tid,
                 "stale": flattened[tid].is_stale,
                 "depends_on": list(flattened[tid].depends_on),
+                "dependency_entries": list(flattened[tid].dependency_entries),
                 "description": flattened[tid].description,
                 "entrypoint": flattened[tid].entrypoint,
                 "slurm": dict(flattened[tid].task_config.slurm or {}),
@@ -408,7 +415,7 @@ def status(
         if verbose:
             if task.description:
                 console.print(f"  description: {task.description}", markup=False)
-            console.print(f"  depends on: {', '.join(task.depends_on) or '-'}")
+            console.print(f"  depends on: {', '.join(task.dependency_entries) or '-'}")
             console.print(
                 f"  entrypoint: {task.entrypoint or '(none)'}",
                 markup=False,

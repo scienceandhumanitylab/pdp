@@ -24,10 +24,16 @@ def backdate_task_yml(*tasks: Task) -> None:
         os.utime(task.task_directory / "task.yml", (1, 1))
 
 
-def make_current(pdp, task_id, depends_on=()):
-    """Valid task with entrypoint task that is current"""
+def touch(path: Path, mtime: float) -> None:
+    """Create the file with a chosen mtime, for staleness tests"""
+    path.touch()
+    os.utime(path, (mtime, mtime))
+
+
+def make_fresh(pdp, task_id, depends_on=(), entrypoint="touch output/ran"):
+    """Valid task with an entrypoint that is fresh"""
     task = pdp.create_task(task_id)
-    write_task_yml(task_id, entrypoint="touch output/ran", depends_on=depends_on)
+    write_task_yml(task_id, entrypoint=entrypoint, depends_on=depends_on)
     backdate_task_yml(task)
     (task.output_folder / "result.csv").write_text("done")
     assert not task.is_stale

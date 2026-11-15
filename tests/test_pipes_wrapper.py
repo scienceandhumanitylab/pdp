@@ -3,14 +3,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from expects import *
 
 from tests.helpers import write_task_yml
 
 
-def run_wrapper(task_id: str) -> subprocess.CompletedProcess:
+def run_wrapper(task_id: str, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, "-m", "pdp.pipes_wrapper", task_id],
+        [sys.executable, "-m", "pdp.pipes_wrapper", task_id, *args],
         check=False,
         cwd=Path.cwd(),
     )
@@ -43,3 +44,11 @@ class TestPipesWrapper:
         expect(result.returncode).to(equal(0))
         expect(os.path.islink("clean/input/import")).to(be_true)
         expect(Path("clean/output/ran").exists()).to(be_true)
+
+    @pytest.mark.parametrize(
+        ("args", "changed"), [((), ""), (("--force",), "input/import/result.csv")]
+    )
+    def test_force_flag_reaches_task_run(self, clean_reports_changed, args, changed):
+        run_wrapper("clean", *args)
+
+        expect(Path("clean/output/changed.txt").read_text()).to(equal(changed))

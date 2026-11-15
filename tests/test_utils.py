@@ -1,7 +1,17 @@
+import pytest
 from expects import *
 
 from pdp.pdp import PDP
-from pdp.utils import find_project_root, parse_dependency, parsing_errors
+from pdp.utils import (
+    changed_env_var,
+    find_project_root,
+    parse_dependency,
+    parsing_errors,
+)
+
+
+def test_changed_env_var_mangles_like_input_env_var():
+    expect(changed_env_var("my-task")).to(equal("PDP_CHANGED_MY_TASK"))
 
 
 class TestFindProjectRoot:
@@ -14,25 +24,27 @@ class TestFindProjectRoot:
 
 
 class TestParseDependency:
-    def test_task(self):
-        expect(parse_dependency("clean")).to(equal(("clean", None, None)))
-
-    def test_wildcard(self):
-        expect(parse_dependency("clean/*.csv")).to(equal(("clean", "*.csv", None)))
-
-    def test_group(self):
-        expect(parse_dependency("clean:csvs")).to(equal(("clean", None, "csvs")))
-
-    def test_slash_empty(self):
-        expect(parse_dependency("clean/")).to(equal(("clean", "", None)))
+    # Parametrize entry and parsed vars. Run test once for each of argvalues
+    @pytest.mark.parametrize(
+        ("entry", "parsed"),
+        [
+            ("clean", ("clean", None, None)),
+            ("clean/*.csv", ("clean", "*.csv", None)),
+            ("clean:csvs", ("clean", None, "csvs")),
+            ("clean/", ("clean", "", None)),
+        ],
+    )
+    def test_parses(self, entry, parsed):
+        expect(parse_dependency(entry)).to(equal(parsed))
 
 
 class TestParsingErrors:
     def test_valid(self):
         expect(parsing_errors("clean/*.csv")).to(equal([]))
-        
-    def test_empty(self):
-        expect(parsing_errors("")).to(contain(contain("empty pattern")))
 
-    def test_slash(self):
-        expect(parsing_errors("/clean")).to(contain(contain("should be relative to output")))
+    @pytest.mark.parametrize(
+        ("entry", "error"),
+        [("", "empty pattern"), ("/clean", "should be relative to output")],
+    )
+    def test_invalid(self, entry, error):
+        expect(parsing_errors(entry)).to(contain(contain(error)))
