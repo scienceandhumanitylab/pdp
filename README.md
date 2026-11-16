@@ -24,10 +24,7 @@ projects (see [Usage](#usage)).
 ## Principles
 
 1. Projects are separated into _tasks_, which are folders in the filesystem. A
-   task is either a collection of subtasks, which are themselves subdirectories
-   in the task, or an _atomic_ task which contains no further subtasks.
-   **NOTE:** subtask functionality is delayed - project only currently works
-   with single level tasks.
+   task is an _atomic_ unit.
 
 2. Atomic tasks contain folders for `input` (input data for the task), `src`
    (source code), and `output` (where the task writes its outputs). Importantly,
@@ -35,13 +32,20 @@ projects (see [Usage](#usage)).
    outputs.
 
 3. Tasks have an entrypoint that allows them to be run with a single command.
-   Usually this is `make`.
+   Usually this is `make`, but it could also be `python src/main.py`,
+   `Rscript src/main.R`, or any other shell command to run that task.
 
 ## Install
 
-pdp is on PyPI as [`pdp-helper`](https://pypi.org/project/pdp-helper/). We
-recommend installing with [uv](https://docs.astral.sh/uv/). First, install uv if
-needed:
+pdp is available on PyPI as
+[`pdp-helper`](https://pypi.org/project/pdp-helper/). It is best installed as a
+global tool, isolated from any project environment. But you can also install at
+the project level if desired.
+
+### With uv
+
+We recommend installing as a global tool using
+[uv tool](https://docs.astral.sh/uv/). First, install uv:
 
 ```sh
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -60,6 +64,12 @@ can install just the core pdp features:
 uv tool install pdp-helper
 ```
 
+pdp can then be run from the command line with:
+
+```sh
+pdp
+```
+
 As new features are added, remember to upgrade to the most recent version of
 pdp:
 
@@ -67,25 +77,19 @@ pdp:
 uv tool upgrade pdp-helper
 ```
 
-pdp can then be run from the command line with:
-
-```sh
-pdp
-```
-
-**Requirements:**
+**Requirements**
 
 - Python 3.11+
-- [uv](https://docs.astral.sh/uv/)
+- [uv](https://docs.astral.sh/uv/) package manager
 
-Optional
+**Optional**
 
 - dagster>=1.13,<1.14
 - dagster-webserver>=1.13,<1.14
 
-### Other Package Managers
+### With pipx
 
-To install with pipx:
+To install as a global tool with pipx:
 
 ```sh
 # install pipx
@@ -94,28 +98,11 @@ python -m pip install --user pipx
 # install pdp
 pipx install pdp-helper
 
-# upgrade pdp
-pipx upgrade pdp-helper
-
 # run pdp
 pdp
-```
 
-To install with Poetry:
-
-```sh
-# Install Poetry
-pipx install poetry
-pipx upgrade poetry
-
-# Install pdp
-poetry add pdp-helper
-
-# Update pdp
-poetry update pdp-helper
-
-# Run pdp
-poetry run pdp
+# upgrade pdp
+pipx upgrade pdp-helper
 ```
 
 ## Usage
@@ -178,12 +165,14 @@ downstream task's `input/` as `input/<dependency>`:
 # clean/task.yml
 depends_on: [import]
 
-depends_on: # also valid formatting
+# alternative formatting, either way works
+depends_on:
   - import
 ```
 
-Alternatively, a `depends_on` entry can cite specific files with a wildcard
-pattern or output group:
+For more specificity, a `depends_on` entry can cite particular files with a
+wildcard pattern or output group. Note that you should not specify a task's
+`output/` folder in the paths, as this is assumed.
 
 ```yaml
 # import/task.yml
@@ -192,20 +181,22 @@ output_groups:
 
 # clean/task.yml
 depends_on:
-  - import/*.csv
-  - import:csvs
+  - import/*.txt # any txt file from import/outputs/
+  - import:csvs # the 'csvs' group defined in import
+  - import/data.parquet # a particularly file in import/outputs/
 ```
 
 File dependencies only symlink matched files into `input/import/`, so the task
-only gets stale when those files change. Before the entrypoint runs, pdp sets
+only becomes stale when those files change. Before the entrypoint runs, pdp sets
 the env var `PDP_CHANGED_<ID>` with the dependency files that changed since the
 task last ran. A task without dependencies that keeps raw files in its own
 `input/` gets the same list in `PDP_CHANGED`.
 
-Let's say you have an `import` task with 10 input files and the task loops
-through them to produce 10 output files. A `clean` task depends on those files
-and produces 10 outputs of its own. You can optionally set up your source file
-in `clean` to read `PDP_CHANGED_<ID>` and run only the files that are stale:
+So, let's say you have an `import` task with 10 input files and the task loops
+through them to produce 10 output files. Then a `clean` task depends on those
+files and produces 10 outputs of its own. You can optionally set up your source
+file in `clean` to read `PDP_CHANGED_<ID>` and run only the files that are
+stale:
 
 ```python
 # clean/src/main.py
@@ -315,22 +306,25 @@ Forward the port from your local machine with
 assets in the UI. Alternatively, use any of the `pdp run` commands followed by
 `--slurm`. For example, `pdp run task1 --slurm`.
 
-### Additional commands
+### Additional Commands
 
 - Run `pdp tree` to see the tree structure of all tasks.
 - Run `pdp validate` to validate the project configuration.
+- Run `pdp scaffold` to build file structures for each task in `pdp.yml`.
 - Run `pdp delete <task>` to delete a task's folder and remove it from
-  `pdp.yml`. It asks first (skip with `--yes`) and refuses while another task
-  depends on it.
-- Run `pdp clean` to delete each task's `clean:` files from `task.yml`, like
-  `clean: [output/*]`.
+  `pdp.yml`. It asks for confirmation first, and refuses if another task depends
+  on it.
+- Run `pdp clean` to delete the contents of `output/` folders for each task. You
+  can run for a single task with `pdp clean <task>`, a range with
+  `pdp clean --from <task_a> --to <task_b>`, or a task and its downstream with
+  `pdp clean --from <task>`.
 - Run `pdp freshen <task>` to make one or more stale tasks fresh without running
   them. Bit hacky, but it gives you some flexibility to fix things when you know
   they should still be fresh. For example, when you change a comment in a `src/`
   file and everything downstream goes stale. Unlike `pdp run`,
-  `pdp freshen clean` selects `clean` and everything downstream of it, not its
-  upstream. Use `pdp freshen clean --only` for just that task, or
-  `pdp freshen --from import --to clean` for a range.
+  `pdp freshen <task>` selects the `<task>` and everything downstream of it, not
+  its upstream. Use `pdp freshen <task> --only` for just that task, or
+  `pdp freshen --from <task_a> --to <task_b>` for a range.
 
 ## Development
 
